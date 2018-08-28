@@ -8,6 +8,10 @@ import struct
 import numpy as np
 import pyart
 import matplotlib.pyplot as plt
+import letkfobsio as loio
+import sys 
+sys.path.append( '../radar_so/fortran/' )
+from cs  import cs   #Fortran code routines.
 
 class SoFields(object):
     """
@@ -39,10 +43,10 @@ class SoFields(object):
     Methods
     -------
     """
-    def __init__(self, filename, variables, rays, grid, opts):
+    def __init__(self, input, variables, rays, grid, opts):
         print('SO Fields object')
         self._options = opts
-        self.radar = SoRadar(filename, variables, rays)
+        self.radar = SoRadar(input, variables, rays)
         self.grid = SoGrid(self.radar, grid[0], grid[1], grid[2])
         self.fields = defaultdict(dict)
 
@@ -66,8 +70,10 @@ class SoFields(object):
                 vars_data[var] = self.radar.fields[var]
 
                 # Convert dBZ to power
-                if 'reflectivity' in vars_data[var]['standard_name']:
+                #if 'reflectivity' in vars_data[var]['standard_name']:
+                if var == 'CdBZ':
                     vars_data[var]['data'] = np.power(10, vars_data[var]['data']/10.)
+            print(vars_data[var]['data'].shape)
 
         # Average data
         self.compute_grid_boxmean(vars_data)
@@ -125,7 +131,8 @@ class SoFields(object):
                         self.fields['grid_' + var][key][nobs > 0]/nobs[nobs > 0]
 
             # Power to DBZ
-            if var == 'TH' or var == 'dBZ':
+            #if var == 'TH' or var == 'dBZ':
+            if var == 'CdBZ':
                 tmp = self.fields['grid_' + var]['data']
                 tmp[tmp > 0] = 10*np.log10(tmp[tmp > 0])
                 tmp[tmp <= 0] = self.fields['grid_' + var]['min']
@@ -177,9 +184,8 @@ class SoRadar(object):
         location to longitudes and latitudes.
 
     """
-    def __init__(self, filename, variables, ray_interval):
-
-        self.__radar = pyart.io.read(filename)
+    def __init__(self, input, variables, ray_interval):
+        self.__radar = input
         self.__variables = variables
         self.__ray_interval = ray_interval
 
@@ -195,19 +201,20 @@ class SoRadar(object):
         self.longitude = self.__radar.longitude
         self.latitude = self.__radar.latitude
         self.altitude = self.__radar.altitude
+        self.range = self.__radar.range
 
         self.get_data()
 
     def get_data(self):
-        self.gate_longitude['data'] = self._extract_rays(self.__radar.gate_longitude['data'])
-        self.gate_latitude['data'] = self._extract_rays(self.__radar.gate_latitude['data'])
-        self.gate_altitude['data'] = self._extract_rays(self.__radar.gate_altitude['data'])
-        self.azimuth['data'] = self._extract_rays(self.__radar.azimuth['data'])
-        self.elevation['data'] = self._extract_rays(self.__radar.elevation['data'])
-        self.range = self.__radar.range
+        self.gate_longitude['data'] = self._extract_rays(self.__radar.gate_longitude['data']).copy()
+        self.gate_latitude['data'] = self._extract_rays(self.__radar.gate_latitude['data']).copy()
+        self.gate_altitude['data'] = self._extract_rays(self.__radar.gate_altitude['data']).copy()
+        self.azimuth['data'] = self._extract_rays(self.__radar.azimuth['data']).copy()
+        self.elevation['data'] = self._extract_rays(self.__radar.elevation['data']).copy()
+
         for var in self.__variables:
-            self.fields[var] = self.__radar.fields[var]
-            self.fields[var]['data'] = self._extract_rays(self.__radar.fields[var]['data'])
+            self.fields[var] =  self.__radar.fields[var].copy()
+            self.fields[var]['data'] = self._extract_rays(self.__radar.fields[var]['data']).copy()
 
     def _extract_rays(self, a):
         if a.ndim == 1:
@@ -298,7 +305,7 @@ class SoGrid(object):
         for k in range(self.nlev):
             self.z[k, :, :] = k*self.dz
 
-def main_radar_so(filename, output_freq, grid_dims, options):
+def main_radar_so(input, output_freq, grid_dims, options):
     """
     Perform superobbing to radar volume
 
@@ -316,10 +323,15 @@ def main_radar_so(filename, output_freq, grid_dims, options):
         {'ref': [id, error, minref], 'dv': [id, error]}
     """
     # Read radar volume using pyart
-    radar = pyart.io.read(filename)
+    if isinstance(input, str):
+        radar = pyart.io.read(filename)
+    else:
+        radar = input
+    print(radar)
 
     # Get reflectivity and Doppler velocity variable name
-    vars_name = get_vars_name(radar)
+    #vars_name = get_vars_name(radar)
+    vars_name = radar.fields.keys()
 
     # Get radar start and end times
     inidate, enddate = get_dates(radar)
@@ -341,7 +353,7 @@ def main_radar_so(filename, output_freq, grid_dims, options):
         print(ray_limits)
 
         # Compute superobbing
-        so = SoFields(filename, vars_name, ray_limits, grid_dims, options)
+        so = SoFields(radar, vars_name, ray_limits, grid_dims, options)
 
         # Check if there is an exisiting file to update the box average
         tmpfile = date2str(date) + '.pkl'
@@ -435,6 +447,7 @@ def update_boxaverage(old_obj, new_obj):
         new_obj.fields[key]['nobs'] = nobs_tot
 
 def write_object(filename, obj):
+    print('WRITING PICKLE FILE ' + filename)
     with open(filename, 'wb') as fileout:  # Overwrites any existing file.
         pickle.dump(obj, fileout, pickle.HIGHEST_PROTOCOL)
 
@@ -443,43 +456,99 @@ def load_object(filename):
         return pickle.load(filein)
 
 def write_letkf(filename, obj):
+    print('WRITING BINARY LETKF FILE ' + filename)
     tmp1 = np.array([4])
     tmp2 = tmp1*7
-    with open(filename, 'wb') as fout:
+    nobs = 0
+    wk = np.empty(7)
+
+    #with open(filename, 'wb') as fout:
         # Write radar location and altitude
-        tmp1.tofile(fout, format='int32')
-        obj.radar.longitude['data'].tofile(fout, format='float32')
-        tmp1.tofile(fout, format='int32')
-        tmp1.tofile(fout, format='int32')
-        obj.radar.latitude['data'].tofile(fout, format='float32')
-        tmp1.tofile(fout, format='int32')
-        tmp1.tofile(fout, format='int32')
-        obj.radar.altitude['data'].tofile(fout, format='float32')
-        tmp1.tofile(fout, format='int32')
+        #tmp1.tofile(fout, format='int32')
+        #obj.radar.longitude['data'].tofile(fout, format='float32')
+        #tmp1.tofile(fout, format='int32')
+        #tmp1.tofile(fout, format='int32')
+        #obj.radar.latitude['data'].tofile(fout, format='float32')
+        #tmp1.tofile(fout, format='int32')
+        #tmp1.tofile(fout, format='int32')
+        #obj.radar.altitude['data'].tofile(fout, format='float32')
+        #tmp1.tofile(fout, format='int32')
 
-        nobs = 0
-        wk = np.empty(7)
-        for k in range(obj.grid.nlev):
-            for j in range(obj.grid.nlat):
-                for i in range(obj.grid.nlon):
-                    for key in obj.fields.keys():
-                        if obj.fields[key]['nobs'][k, j, i] > 0:
-                            wk[0] = obj.fields[key]['id']
-                            wk[1] = obj.fields[key]['az'][k, j, i]
-                            wk[2] = obj.fields[key]['el'][k, j, i]
-                            wk[3] = obj.fields[key]['ra'][k, j, i]
-                            wk[4] = obj.fields[key]['data'][k, j, i]
-                            wk[5] = obj.fields[key]['error']
-                            wk[6] = 3 # CORREGIR !!!!!!
+    nvar = len( obj.fields.keys() )
+    #ngrid = obj.grid.nlev*obj.grid.nlat*obj.grid.nlon
 
-                            # Write necessary data, including observation id and error and radar type
-                            tmp2.tofile(fout, format='int32')
-                            wk.tofile(fout, format='float32')
-                            tmp2.tofile(fout, format='int32')
+    tmp_error=np.zeros( nvar )
+    tmp_id   =np.zeros( nvar )
+    tmp_lambda =  3.0
+    #tmp_obs = np.zeros(( nvars*ngrid , 8))
 
-                            nobs += 1
 
-        print('A total number of ' + str(nobs) + ' observations have been written to the file ' + filename  )
+    for iv , var in enumerate(obj.fields.keys()) :
+        if iv == 0 :
+           [nlon,nlat,nlev]=np.shape( obj.fields[var]['data'] )
+           tmp_data =np.zeros(( nlon,nlat,nlev,nvar))
+           tmp_az =np.zeros(( nlon,nlat,nlev,nvar))
+           tmp_ra =np.zeros(( nlon,nlat,nlev,nvar))
+           tmp_el =np.zeros(( nlon,nlat,nlev,nvar))
+           tmp_n  =np.zeros(( nlon,nlat,nlev,nvar)).astype(int)
+
+        tmp_data[:,:,:,iv] = obj.fields[var]['data']
+        tmp_az  [:,:,:,iv] = obj.fields[var]['az']
+        tmp_el  [:,:,:,iv] = obj.fields[var]['el']
+        tmp_ra  [:,:,:,iv] = obj.fields[var]['ra']
+        tmp_n   [:,:,:,iv] = obj.fields[var]['nobs']
+        tmp_error     [iv] = obj.fields[var]['error']
+        tmp_id        [iv] = obj.fields[var]['id']
+
+    cs.write_radar(nlon=nlon,nlat=nlat,nlev=nlev,nvar=nvar,
+                   data_in=tmp_data,ndata_in=tmp_n,
+                   grid_az=tmp_az,grid_el=tmp_el,grid_ra=tmp_ra,
+                   error=tmp_error,ido=tmp_id,lambdar=tmp_lambda,  
+                   filename=filename,
+                   radar_lon=obj.radar.longitude['data'],
+                   radar_lat=obj.radar.latitude['data'] ,
+                   radar_z=obj.radar.altitude['data'] )
+
+        
+
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,0]= obj.fields[var]['id']
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,1]= np.reshape( obj.fields[var]['az'] , ngrid )
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,2]= np.reshape( obj.fields[var]['el'] , ngrid )
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,3]= np.reshape( obj.fields[var]['ra'] , ngrid )
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,4]= np.reshape( obj.fields[var]['data'] , ngrid )
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,5]= obj.fields[var]['error']
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,6]= 3 #TODO chequear este valor 
+    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,7]= np.reshape( obj.fields[var]['nobs'] , ngrid )
+
+    #tmp_obs=tmp_obs[tmp_obs[:,7] > 0,0:7]
+
+    #print('A total number of ' + str(tmp_obs.shape[0]) + ' observations have been written to file ' + filename)
+
+    #fo = open( filename , 'wb')
+
+    #loio.writeobs_radar_all(fo, obj.radar.longitude['data'] , obj.radar.latitude['data'] , obj.radar.altitude['data'] , tmp_obs , endian='>' )
+
+        #for k in range(obj.grid.nlev):
+        #    for j in range(obj.grid.nlat):
+        #        for i in range(obj.grid.nlon):
+        #            for key in obj.fields.keys():
+        #                if obj.fields[key]['nobs'][k, j, i] > 0:
+        #                    wk[0] = obj.fields[key]['id']
+        #                    wk[1] = obj.fields[key]['az'][k, j, i]
+        #                    wk[2] = obj.fields[key]['el'][k, j, i]
+        #                    wk[3] = obj.fields[key]['ra'][k, j, i]
+        #                    wk[4] = obj.fields[key]['data'][k, j, i]
+        #                    wk[5] = obj.fields[key]['error']
+        #                    wk[6] = 3 # CORREGIR (banda del radar) !!!!!!
+
+        #                    # Write necessary data, including observation id and error and radar type
+        #                    tmp2.tofile(fout, format='int32')
+        #                    wk.tofile(fout, format='float32')
+        #                    tmp2.tofile(fout, format='int32')
+
+        #                    nobs += 1
+
+    #print('A total number of ' + str(tmp_obs.shape[0]) + ' observations have been written to file ' + filename)
 
 def str2date(string):
     """ String must be with format %Y-%m-%dT%H:%M:%SZ """
@@ -561,3 +630,6 @@ if __name__ == '__main__':
         plt.colorbar()
         plt.show()
     '''
+
+
+
