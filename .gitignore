@@ -1,1 +1,5 @@
 *.nc3
+*.m
+*.dat
+*.pkl
+__pycache__
