@@ -2,13 +2,12 @@
 Functions to perform radar superobbing for LETKF-WRF data assimilation system
 """
 from collections import defaultdict
-import numpy as np
-import numpy.ma
-import pyart
 from datetime import datetime, timedelta
+import pickle
+import struct
+import numpy as np
+import pyart
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
-import manage_dates as dates
 
 class SoFields(object):
     """
@@ -23,6 +22,8 @@ class SoFields(object):
         meters.
     max_height: int
         Cartesian grid maximum height in meters.
+    mindbz : int
+        Reflectivity minimum value.
 
     Attributes
     ----------
@@ -38,8 +39,9 @@ class SoFields(object):
     Methods
     -------
     """
-    def __init__(self, filename, variables, rays, grid):
+    def __init__(self, filename, variables, rays, grid, opts):
         print('SO Fields object')
+        self._options = opts
         self.radar = SoRadar(filename, variables, rays)
         self.grid = SoGrid(self.radar, grid[0], grid[1], grid[2])
         self.fields = defaultdict(dict)
@@ -57,16 +59,14 @@ class SoFields(object):
         """
         vars_data = {}
         for var in variables:
-            print(var)
             if self._check_field_exists(var):
                 # Allocate vars in fields attribute
-                self.allocate_var('grid_' + var, self.grid.nlon, self.grid.nlat, self.grid.nlev)
+                self.allocate_var(var, self.grid.nlon, self.grid.nlat, self.grid.nlev)
                 # Get data from radar object
                 vars_data[var] = self.radar.fields[var]
 
                 # Convert dBZ to power
                 if 'reflectivity' in vars_data[var]['standard_name']:
-                    print('ToPower')
                     vars_data[var]['data'] = np.power(10, vars_data[var]['data']/10.)
 
         # Average data
@@ -74,11 +74,15 @@ class SoFields(object):
 
     def allocate_var(self, var, nx, ny, nz):
         """ Allocate variables to a key in self.fields """
-        self.fields[var]['nobs'] = np.zeros((nz, ny, nx))
-        self.fields[var]['data'] = np.zeros((nz, ny, nx))
-        self.fields[var]['az'] = np.zeros((nz, ny, nx))
-        self.fields[var]['el'] = np.zeros((nz, ny, nx))
-        self.fields[var]['ra'] = np.zeros((nz, ny, nx))
+        self.fields['grid_' + var]['nobs'] = np.zeros((nz, ny, nx))
+        self.fields['grid_' + var]['data'] = np.zeros((nz, ny, nx))
+        self.fields['grid_' + var]['az'] = np.zeros((nz, ny, nx))
+        self.fields['grid_' + var]['el'] = np.zeros((nz, ny, nx))
+        self.fields['grid_' + var]['ra'] = np.zeros((nz, ny, nx))
+        self.fields['grid_' + var]['id'] =  self._options[var][0]
+        self.fields['grid_' + var]['error'] =  self._options[var][1]
+        if len(self._options[var]) == 3:
+            self.fields['grid_' + var]['min'] = self._options[var][2]
 
     def compute_grid_boxmean(self, variables):
         """
@@ -89,6 +93,7 @@ class SoFields(object):
         variables : list of numpy array
         """
         print('BOX AVERAGE')
+        print('Adding')
         for ia in range(self.radar.nrays):
             for ir in range(self.radar.ngates):
 
@@ -100,10 +105,8 @@ class SoFields(object):
                 if self._check_point_in_grid(i, j, k):
                     for var in variables.keys():
                         if not np.ma.is_masked(variables[var]['data'][ia, ir]):
-                            #print(variables[var]['data'][ia, ir])
                             self.fields['grid_' + var]['data'][k, j, i] += \
                                 variables[var]['data'][ia, ir]
-                            #print(self.fields['grid_' + var]['data'][i, j, k])
                             self.fields['grid_' + var]['nobs'][k, j, i] += 1
                             self.fields['grid_' + var]['az'][k, j, i] += \
                                 self.radar.azimuth['data'][ia]
@@ -113,19 +116,19 @@ class SoFields(object):
                                 self.radar.range['data'][ir]
 
         # Compute observations boxaverage
+        print('Averaging')
         for var in variables.keys():
             nobs = self.fields['grid_' + var]['nobs']
             for key in self.fields['grid_' + var].keys():
-                if not key == 'nobs':
+                if key != 'nobs' and key != 'id' and key != 'error' and key != 'min':
                     self.fields['grid_' + var][key][nobs > 0] = \
                         self.fields['grid_' + var][key][nobs > 0]/nobs[nobs > 0]
 
             # Power to DBZ
             if var == 'TH' or var == 'dBZ':
-                print('ToDBZ')
                 tmp = self.fields['grid_' + var]['data']
                 tmp[tmp > 0] = 10*np.log10(tmp[tmp > 0])
-                tmp[tmp <= 0] = 0
+                tmp[tmp <= 0] = self.fields['grid_' + var]['min']
 
     #*********************
     # Auxiliary functions
@@ -143,13 +146,9 @@ class SoFields(object):
 
     def _check_point_in_grid(self, i, j, k):
         """ Check if a gridpoint is inside grid domain """
-        return True if 0 <= i < self.grid.nlon and  \
-            0 <= j < self.grid.nlat and \
-            0 <= k < self.grid.nlev else False
-
-    #def _check_radarpoint_is_masked(self, point):
-        #""" Check if a radar point has a nan value """
-        #return True if np.ma.is_masked(point) else False
+        return True if 0 <= k < self.grid.nlev and \
+            0 <= i < self.grid.nlon and \
+            0 <= j < self.grid.nlat else False
 
     def _check_field_exists(self, field_name):
         if field_name not in self.radar.fields.keys():
@@ -171,8 +170,12 @@ class SoRadar(object):
 
     Attributes
     ----------
-    radar : Radar
-        PyArt-Like radar object
+    gate_longitude, gate_latitude : LazyLoadDict
+        Geographic location of each gate.  The projection parameter(s) defined
+        in the `projection` attribute are used to perform an inverse map
+        projection from the Cartesian gate locations relative to the radar
+        location to longitudes and latitudes.
+
     """
     def __init__(self, filename, variables, ray_interval):
 
@@ -188,9 +191,10 @@ class SoRadar(object):
         self.fields = defaultdict(dict)
 
         self.ngates = self.__radar.ngates
+        self.nrays = ray_interval[-1] - ray_interval[0]
         self.longitude = self.__radar.longitude
         self.latitude = self.__radar.latitude
-        self.nrays = ray_interval[-1] - ray_interval[0]
+        self.altitude = self.__radar.altitude
 
         self.get_data()
 
@@ -294,7 +298,7 @@ class SoGrid(object):
         for k in range(self.nlev):
             self.z[k, :, :] = k*self.dz
 
-def main_radar_so(filename, output_freq, grid_dims):
+def main_radar_so(filename, output_freq, grid_dims, options):
     """
     Perform superobbing to radar volume
 
@@ -307,26 +311,18 @@ def main_radar_so(filename, output_freq, grid_dims):
     grid_dims : list [dx, dz, max_height]
         Cartesian grid horizontal and vertical dimensions and maximum height, in meters.
     radar : objecto opcional.
+    options : dict
+        Information needed to write the binary file in LETKF format.
+        {'ref': [id, error, minref], 'dv': [id, error]}
     """
     # Read radar volume using pyart
     radar = pyart.io.read(filename)
 
-    # Get reflectivity and Doppler velocity variables names
-    vars_name = []
-    for key in radar.fields.keys():
-        if key != 'CM' and key != 'TV' and ('reflectivity' in radar.fields[key]['standard_name'] or \
-            'radial_velocity' in radar.fields[key]['standard_name']):
-            vars_name.append(key)
-    print(vars_name)
+    # Get reflectivity and Doppler velocity variable name
+    vars_name = get_vars_name(radar)
 
     # Get radar start and end times
-    #TEMPORAL (ver si se puede obtener de algun atributo de radar en vez de usar
-    #el nombre del archivo)
-    #initime =  radar.metadata['time_coverage_start']
-    #endtime =  radar.metadata['time_coverage_end']
-    initime, endtime = parse_dates(filename)
-    inidate = dates.str2date(initime)
-    enddate = dates.str2date(endtime)
+    inidate, enddate = get_dates(radar)
 
     # Create output files list according to out_freq
     output_dates = get_letkf_outputs(inidate, enddate, output_freq)
@@ -336,10 +332,6 @@ def main_radar_so(filename, output_freq, grid_dims):
     inirayidx = 0
     for date in output_dates.keys():
 
-        if check_file_exists(dates.date2str(date) + '.npz'):
-            # Load obs and nobs
-            pass
-
         # Get radar rays that contribute to current date
         diff = (output_dates[date][1]-inidate).total_seconds()
         while iray < radar.nrays and np.abs(radar.time['data'][iray] - diff) > 1e-3:
@@ -348,27 +340,43 @@ def main_radar_so(filename, output_freq, grid_dims):
         ray_limits = [inirayidx, endrayidx]
         print(ray_limits)
 
-        # Initialize superobbing radar object
-        #print(radar.fields[vars_name[0]]['data'].shape)
-        #tmpradar = SoRadar(filename, vars_name, [inirayidx, endrayidx])
-        #print(tmpradar.fields[vars_name[0]]['data'].shape)
-
         # Compute superobbing
-        so = SoFields(filename, vars_name, ray_limits, grid_dims)
+        so = SoFields(filename, vars_name, ray_limits, grid_dims, options)
+
+        # Check if there is an exisiting file to update the box average
+        tmpfile = date2str(date) + '.pkl'
+        if check_file_exists(tmpfile):
+            print('Updating boxmean from previous file ' + tmpfile)
+            tmp_so = load_object('./' + tmpfile)
+            update_boxaverage(tmp_so, so)
 
         # Write intermediate file
+        write_object('./' + date2str(date) + '.pkl', so.fields)
 
         # Write LETKF file
+        outfile = date2str(date) + '.dat'
+        write_letkf(outfile, so)
 
         inirayidx = iray
 
     return so
 
+def get_vars_name(obj):
+    """ Get reflectivity and Doppler veolocity names from radar object """
+    variable_name = []
+    for key in obj.fields.keys():
+        if key != 'CM' and key != 'TV' and ('reflectivity' in obj.fields[key]['standard_name'] or \
+            'radial_velocity' in obj.fields[key]['standard_name']):
+            variable_name.append(key)
+    return variable_name
 
-def check_file_exists(file):
-    """ file : npz file """
-    import os
-    return True if os.path.exists(file) else False
+def get_dates(obj):
+    """ Get radar initial and final dates from radar object """
+    initime = obj.time['units'].split(' ')[2]
+    initial_date = str2date(initime)
+    delta = timedelta(seconds=obj.time['data'][-1].tolist())
+    end_date = initial_date + delta
+    return initial_date, end_date
 
 def get_letkf_outputs(inidate, enddate, freq):
     """
@@ -390,7 +398,7 @@ def get_letkf_outputs(inidate, enddate, freq):
         # Create output list
         delta = timedelta(seconds=freq)
         output_dates = defaultdict(list)
-        for date in dates.datespan(outputini, outputend+delta, delta):
+        for date in datespan(outputini, outputend+delta, delta):
             iniinterval = date - timedelta(seconds=freq/2)
             endinterval = date + timedelta(seconds=freq/2)
             output_dates[date] = [iniinterval, endinterval]
@@ -408,11 +416,91 @@ def check_date_in_interval(date, lower, upper):
         raise ValueError('Date not in interval: ' + date)
     return True
 
-def write_grid(radar, so_ref, so_dv, grid, file):
-    pass
+def check_file_exists(filename):
+    """ file : pickle file """
+    import os
+    return True if os.path.exists(filename) else False
 
-def write_letkf(so_ref, so_dv, grid, file):
-    pass
+def update_boxaverage(old_obj, new_obj):
+    """ Update superobbing object with previous data """
+    for key in new_obj.fields.keys():
+        nobs_old = old_obj[key]['nobs']
+        nobs_new = new_obj.fields[key]['nobs']
+        nobs_tot = nobs_old + nobs_new
+        for subkey in new_obj.fields[key].keys():
+            if subkey != 'nobs' and subkey != 'id' and subkey != 'error' and subkey != 'min':
+                new_obj.fields[key][subkey] = \
+                    np.ma.masked_invalid((nobs_new*new_obj.fields[key][subkey] +\
+                    nobs_old*old_obj[key][subkey])/np.ma.masked_invalid(nobs_tot))
+        new_obj.fields[key]['nobs'] = nobs_tot
+
+def write_object(filename, obj):
+    with open(filename, 'wb') as fileout:  # Overwrites any existing file.
+        pickle.dump(obj, fileout, pickle.HIGHEST_PROTOCOL)
+
+def load_object(filename):
+    with open(filename, 'rb') as filein:
+        return pickle.load(filein)
+
+def write_letkf(filename, obj):
+    tmp1 = np.array([4])
+    tmp2 = tmp1*7
+    with open(filename, 'wb') as fout:
+        # Write radar location and altitude
+        tmp1.tofile(fout, format='int32')
+        obj.radar.longitude['data'].tofile(fout, format='float32')
+        tmp1.tofile(fout, format='int32')
+        tmp1.tofile(fout, format='int32')
+        obj.radar.latitude['data'].tofile(fout, format='float32')
+        tmp1.tofile(fout, format='int32')
+        tmp1.tofile(fout, format='int32')
+        obj.radar.altitude['data'].tofile(fout, format='float32')
+        tmp1.tofile(fout, format='int32')
+
+        nobs = 0
+        wk = np.empty(7)
+        for k in range(obj.grid.nlev):
+            for j in range(obj.grid.nlat):
+                for i in range(obj.grid.nlon):
+                    for key in obj.fields.keys():
+                        if obj.fields[key]['nobs'][k, j, i] > 0:
+                            wk[0] = obj.fields[key]['id']
+                            wk[1] = obj.fields[key]['az'][k, j, i]
+                            wk[2] = obj.fields[key]['el'][k, j, i]
+                            wk[3] = obj.fields[key]['ra'][k, j, i]
+                            wk[4] = obj.fields[key]['data'][k, j, i]
+                            wk[5] = obj.fields[key]['error']
+                            wk[6] = 3 # CORREGIR !!!!!!
+
+                            # Write necessary data, including observation id and error and radar type
+                            tmp2.tofile(fout, format='int32')
+                            wk.tofile(fout, format='float32')
+                            tmp2.tofile(fout, format='int32')
+
+                            nobs += 1
+
+        print('A total number of ' + str(nobs) + ' observations have been written to the file ' + filename  )
+
+def str2date(string):
+    """ String must be with format %Y-%m-%dT%H:%M:%SZ """
+    return datetime.strptime(string, '%Y-%m-%dT%H:%M:%SZ')
+
+def date2str(date):
+    """ Datetime object to string with format %Y-%m-%dT%H:%M:%SZ """
+    return datetime.strftime(date, '%Y%m%d_%H%M%S')
+
+def datespan(startDate, endDate, delta):
+    '''
+    La funcion devuelve un "generator" que contiene un objecto date
+    Input:
+        starDate (objeto): de la clase datetime que indica la fecha inicial
+        endDate (objeto): de la clase datetime que indica la fecha final
+        delta (objeto): de la clase datetime que indica el intervalo temporal
+    '''
+    currentDate = startDate
+    while currentDate < endDate:
+        yield currentDate
+        currentDate += delta
 
 def parse_dates(filename):
     """ Get initial and final times from a radar filename """
@@ -432,30 +520,44 @@ def parse_dates(filename):
 
     return ini, end
 
+
+'''
+import struct
+
+data = [# your data]
+
+with open('your_data.dat', 'rb') as your_data_file:
+    values = struct.unpack('i'*len(data), your_data_file.read())
+
+with open('your_data.dat', 'wb') as your_dat_file:
+    your_dat_file.write(struct.pack('i'*len(data), *data))
+
+'''
 if __name__ == '__main__':
     file = 'cfrad.20091117_174348.000_to_20091117_174737.000_PAR_SUR.nc3'
     #file = './cfrad.20100111_000003.000_to_20100111_000340.001_ANG240_v1_SUR.nc'
     file = 'cfrad.20170926_171335.0000_to_20170926_171446.0000_RMA1_0122_03.nc3'
     print(file)
 
-    #a = main_radar_so(file, 300, [2000, 2000, 25e3])
+    a = main_radar_so(file, 300, [2000, 2000, 25e3], {'TH':[4001, 5, 0], 'VRAD':[4002, 2]})
 
-    #print('PLOTTING')
+    '''
     original = pyart.io.read(file)
     display = pyart.graph.RadarDisplay(original)
     print('PLOTTING ORIGINAL')
-    for i in range(original.nsweeps):
+    for sweep in range(original.nsweeps):
         fig = plt.figure()
-        display.plot_ppi('VRAD', sweep=i)
+        display.plot_ppi('VRAD', sweep=sweep)
         plt.show()
 
     print('DOING SO')
     so = SoFields(file, ['VRAD'], [0, original.nrays],[10e3, 1000, 25e3])
 
     print('PLOTTING SO')
-    for i in range(so.grid.nlev):
-        print(i)
+    for lev in range(so.grid.nlev):
+        print(lev)
         fig = plt.figure()
-        plt.pcolormesh(so.fields['grid_VRAD']['data'][i,:,:])
+        plt.pcolormesh(so.fields['grid_VRAD']['data'][lev,:,:])
         plt.colorbar()
         plt.show()
+    '''
