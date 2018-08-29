@@ -8,8 +8,8 @@ import struct
 import numpy as np
 import pyart
 import matplotlib.pyplot as plt
-import letkfobsio as loio
 import sys 
+import os
 sys.path.append( '../radar_so/fortran/' )
 from cs  import cs   #Fortran code routines.
 
@@ -47,7 +47,7 @@ class SoFields(object):
         print('SO Fields object')
         self._options = opts
         self.radar = SoRadar(input, variables, rays)
-        self.grid = SoGrid(self.radar, grid[0], grid[1], grid[2])
+        self.grid = SoGrid(self.radar, grid[0], grid[1], grid[2],grid[3])
         self.fields = defaultdict(dict)
 
         self.compute_so(variables)
@@ -71,7 +71,7 @@ class SoFields(object):
 
                 # Convert dBZ to power
                 #if 'reflectivity' in vars_data[var]['standard_name']:
-                if var == 'CdBZ':
+                if var == 'CZH':
                     vars_data[var]['data'] = np.power(10, vars_data[var]['data']/10.)
             print(vars_data[var]['data'].shape)
 
@@ -91,6 +91,7 @@ class SoFields(object):
             self.fields['grid_' + var]['min'] = self._options[var][2]
 
     def compute_grid_boxmean(self, variables):
+        import numpy.matlib 
         """
         Compute the i, j, k for each radar grid point and box-average the data.
 
@@ -100,42 +101,123 @@ class SoFields(object):
         """
         print('BOX AVERAGE')
         print('Adding')
-        for ia in range(self.radar.nrays):
-            for ir in range(self.radar.ngates):
 
-                # Get i, j, k using a very simple approach since we are assuming
-                # a regular lat/lon/z grid
-                [k, j, i] = self._radar2grid(ia, ir)
+        nr=self.radar.ngates
+        na=self.radar.nrays
+        nvar=len( self.fields.keys() )
 
-                # Skip data outside the grid domain
-                if self._check_point_in_grid(i, j, k):
-                    for var in variables.keys():
-                        if not np.ma.is_masked(variables[var]['data'][ia, ir]):
-                            self.fields['grid_' + var]['data'][k, j, i] += \
-                                variables[var]['data'][ia, ir]
-                            self.fields['grid_' + var]['nobs'][k, j, i] += 1
-                            self.fields['grid_' + var]['az'][k, j, i] += \
-                                self.radar.azimuth['data'][ia]
-                            self.fields['grid_' + var]['el'][k, j, i] += \
-                                self.radar.elevation['data'][ia]
-                            self.fields['grid_' + var]['ra'][k, j, i] += \
-                                self.radar.range['data'][ir]
+        lon_ini=self.grid.lon[0, 0]
+        lat_ini=self.grid.lat[0, 0]
+        z_ini=0.0
+
+        dlon=self.grid.dlon
+        dlat=self.grid.dlat
+        dz  =self.grid.dz
+
+        nlon=self.grid.nlon
+        nlat=self.grid.nlat
+        nz  =self.grid.nlev
+
+
+        local_undef = -999.0e10
+
+        #Reshape variables.
+
+        latin= np.reshape( self.radar.gate_longitude['data'] , na*nr )
+        lonin= np.reshape( self.radar.gate_latitude['data'] , na*nr )
+        zin  = np.reshape( self.radar.gate_altitude['data'] , na*nr )
+
+        #Group all variables that will be "superobbed" into one single array.
+        #This is to take advantage of paralellization. Different columns will be processed in parallel.
+        datain=np.zeros( ( na*nr , nvar + 3 ) )
+
+        var_names = []
+
+        for iv , var in enumerate( variables )  :
+
+            #TODO chequear que esto esta bien y que es consitente con el reshape que viene despues.
+            datain[:,4*iv+0]=np.matlib.repmat( self.radar.azimuth['data'] , 1 , nr )
+            datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
+            datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
+
+            datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
+            tmp_mask         =  np.reshape( variables[var]['data'].mask , na*nr )
+            #Use the same undef value for all variables.
+            datain[:,4*iv+0][ np.logical_not( tmp_mask ) ]=local_undef
+            datain[:,4*iv+1][ np.logical_not( tmp_mask ) ]=local_undef
+            datain[:,4*iv+2][ np.logical_not( tmp_mask ) ]=local_undef
+            datain[:,4*iv+3][ np.logical_not( tmp_mask ) ]=local_undef
+
+            if var == 'CZH' :
+               w_i = 4*iv+3 #Reflectivity is the variable that can be used as a weight.
+
+        weigth=np.zeros( 4*nvar ).astype(bool)  #This flag decides wether the superobbing will be weigthed by the reflectivity or not (for each variable)
+        weigth[w_i-4:w_i]=False                 #Do not weigth the reflectivity.
+        weigth_ind=np.ones( 4*nvar )*w_i
+        is_angle=np.zeros( 4*nvar )             #This flag decides if variable will be treated as an angle in the superobbing (usually true for the azimuth)
+        is_angle[range(0,4*nvar,4)]=True        #Azimuths will be treated as angles.
+
+
+        #The function outputs 
+        #data_ave - weigthed average
+        #data_max - maximum value
+        #data_min - minimum value
+        #data_std - standard deviation (can be used to filter some super obbs)
+        #data_n   - number of samples  (can be used to filter some super obbs)
+        #data_w   - sum of weigths
+        [data_ave , data_max , data_min , data_std , data_n , data_w ]=cs.com_interp_boxavereg(
+                             xini=z_ini,dx=dz,nx=nz,yini=lat_ini,dy=dlat,ny=nlat,
+                             zini=lon_ini  ,dz=dlon  ,nz=nlon  ,nvar=4*nvar,
+                             xin=zin,yin=latin,zin=lonin,datain=datain,nin=na*nr,   
+                             undef=local_undef,weigth=weigth,weigth_ind=weigth_ind,is_angle=is_angle)
+        #TODO> Aca se puede poner un control de calidad que filtre en funcion de n o de la varianza.
+
+        #"Unpack" the superobbed data.
+        for iv , var in enumerate( variables )  :
+            self.fields['grid_' + var]['az']=data_ave[:,:,:,0+iv*4]
+            self.fields['grid_' + var]['el']=data_ave[:,:,:,1+iv*4]
+            self.fields['grid_' + var]['ra']=data_ave[:,:,:,2+iv*4]
+            self.fields['grid_' + var]['data']=data_ave[:,:,:,3+iv*4]
+            self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
+
+        print( self.fields['grid_' + var]['data'].shape )
+
+        #for ia in range(self.radar.nrays):
+        #    for ir in range(self.radar.ngates):
+        #
+        #        # Get i, j, k using a very simple approach since we are assuming
+        #        # a regular lat/lon/z grid
+        #        [k, j, i] = self._radar2grid(ia, ir)
+        #
+        #        # Skip data outside the grid domain
+        #        if self._check_point_in_grid(i, j, k):
+        #            for var in variables.keys():
+        #                if not np.ma.is_masked(variables[var]['data'][ia, ir]):
+        #                    self.fields['grid_' + var]['data'][k, j, i] += \
+        #                        variables[var]['data'][ia, ir]
+        #                    self.fields['grid_' + var]['nobs'][k, j, i] += 1
+        #                    self.fields['grid_' + var]['az'][k, j, i] += \
+        #                        self.radar.azimuth['data'][ia]
+        #                    self.fields['grid_' + var]['el'][k, j, i] += \
+        #                        self.radar.elevation['data'][ia]
+        #                    self.fields['grid_' + var]['ra'][k, j, i] += \
+        #                        self.radar.range['data'][ir]
 
         # Compute observations boxaverage
-        print('Averaging')
-        for var in variables.keys():
-            nobs = self.fields['grid_' + var]['nobs']
-            for key in self.fields['grid_' + var].keys():
-                if key != 'nobs' and key != 'id' and key != 'error' and key != 'min':
-                    self.fields['grid_' + var][key][nobs > 0] = \
-                        self.fields['grid_' + var][key][nobs > 0]/nobs[nobs > 0]
+        #print('Averaging')
+        #for var in variables.keys():
+        #    nobs = self.fields['grid_' + var]['nobs']
+        #    for key in self.fields['grid_' + var].keys():
+        #        if key != 'nobs' and key != 'id' and key != 'error' and key != 'min':
+        #            self.fields['grid_' + var][key][nobs > 0] = \
+        #                self.fields['grid_' + var][key][nobs > 0]/nobs[nobs > 0]
 
-            # Power to DBZ
-            #if var == 'TH' or var == 'dBZ':
-            if var == 'CdBZ':
-                tmp = self.fields['grid_' + var]['data']
-                tmp[tmp > 0] = 10*np.log10(tmp[tmp > 0])
-                tmp[tmp <= 0] = self.fields['grid_' + var]['min']
+        #    # Power to DBZ
+        #    #if var == 'TH' or var == 'dBZ':
+        #    if var == 'CTH':
+        #        tmp = self.fields['grid_' + var]['data']
+        #        tmp[tmp > 0] = 10*np.log10(tmp[tmp > 0])
+        #        tmp[tmp <= 0] = self.fields['grid_' + var]['min']
 
     #*********************
     # Auxiliary functions
@@ -254,13 +336,14 @@ class SoGrid(object):
     z : numpy array
         Height for each grid point.
     """
-    def __init__(self, radar, dx, dz, maxz):
+    def __init__(self, radar, dx, dz, maxz , maxrange = None ):
 
         self.dx = dx
         self.dz = dz
 
         # Compute possible value for `nlon` in order to cover the maximum radar range
-        maxrange = 2.*np.max(radar.range['data'])
+        if maxrange == None  :
+            maxrange = 2.*np.max(radar.range['data'])
         self.nlon = np.ceil(maxrange/self.dx).astype('int')
         self.nlat = self.nlon
         self.nlev = np.ceil(maxz/self.dz).astype('int')
@@ -305,7 +388,7 @@ class SoGrid(object):
         for k in range(self.nlev):
             self.z[k, :, :] = k*self.dz
 
-def main_radar_so(input, output_freq, grid_dims, options):
+def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
     """
     Perform superobbing to radar volume
 
@@ -328,6 +411,11 @@ def main_radar_so(input, output_freq, grid_dims, options):
     else:
         radar = input
     print(radar)
+
+    if outputpath == None  :
+        outputpath='./'
+    os.makedirs( outputpath + '/grid/' ,exist_ok=True)
+    os.makedirs( outputpath + '/letkf/',exist_ok=True)
 
     # Get reflectivity and Doppler velocity variable name
     #vars_name = get_vars_name(radar)
@@ -355,18 +443,41 @@ def main_radar_so(input, output_freq, grid_dims, options):
         # Compute superobbing
         so = SoFields(radar, vars_name, ray_limits, grid_dims, options)
 
+        #original = pyart.io.read(file)
+        display = pyart.graph.RadarDisplay(radar)
+        print('PLOTTING ORIGINAL')
+        for sweep in range(radar.nsweeps):
+           fig = plt.figure()
+           display.plot_ppi('CZH', sweep=sweep)
+           plt.show()
+
+        print('DOING SO')
+        #so = SoFields(file, ['VRAD'], [0, original.nrays],[10e3, 1000, 25e3])
+
+        print('PLOTTING SO')
+        for lev in range(so.grid.nlev):
+           print(lev)
+           fig = plt.figure()
+           plt.pcolormesh(so.fields['grid_CZH']['data'][lev,:,:])
+           plt.colorbar()
+           plt.show()
+
+
+
+
+
         # Check if there is an exisiting file to update the box average
-        tmpfile = date2str(date) + '.pkl'
+        tmpfile = outputpath + '/' + radar.metadata['instrument_name'] +  date2str(date) + '.pkl'
         if check_file_exists(tmpfile):
             print('Updating boxmean from previous file ' + tmpfile)
-            tmp_so = load_object('./' + tmpfile)
+            tmp_so = load_object(tmpfile)
             update_boxaverage(tmp_so, so)
 
         # Write intermediate file
-        write_object('./' + date2str(date) + '.pkl', so.fields)
+        write_object(tmpfile, so.fields)
 
         # Write LETKF file
-        outfile = date2str(date) + '.dat'
+        outfile = outputpath + '/' + radar.metadata['instrument_name'] + date2str(date) + '.dat'
         write_letkf(outfile, so)
 
         inirayidx = iray
@@ -441,6 +552,7 @@ def update_boxaverage(old_obj, new_obj):
         nobs_tot = nobs_old + nobs_new
         for subkey in new_obj.fields[key].keys():
             if subkey != 'nobs' and subkey != 'id' and subkey != 'error' and subkey != 'min':
+                print( nobs_old.shape , old_obj[key][subkey].shape )
                 new_obj.fields[key][subkey] = \
                     np.ma.masked_invalid((nobs_new*new_obj.fields[key][subkey] +\
                     nobs_old*old_obj[key][subkey])/np.ma.masked_invalid(nobs_tot))
@@ -479,7 +591,7 @@ def write_letkf(filename, obj):
 
     tmp_error=np.zeros( nvar )
     tmp_id   =np.zeros( nvar )
-    tmp_lambda =  3.0
+    tmp_lambda =  3.0 #TODO check this value and get it from the radar object.
     #tmp_obs = np.zeros(( nvars*ngrid , 8))
 
 
@@ -608,7 +720,7 @@ if __name__ == '__main__':
     file = 'cfrad.20170926_171335.0000_to_20170926_171446.0000_RMA1_0122_03.nc3'
     print(file)
 
-    a = main_radar_so(file, 300, [2000, 2000, 25e3], {'TH':[4001, 5, 0], 'VRAD':[4002, 2]})
+    a = main_radar_so(file, 300, [2000, 2000, 25e3], {'ZH':[4001, 5, 0], 'VRAD':[4002, 2]})
 
     '''
     original = pyart.io.read(file)

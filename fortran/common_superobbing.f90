@@ -75,4 +75,130 @@ nobs=0
 END SUBROUTINE write_radar
 
 
+!2D interpolation using box average. Destination grid is assumed to be regular.
+SUBROUTINE com_interp_boxavereg(xini,dx,nx,yini,dy,ny,zini,dz,nz,nvar,xin,yin,zin,datain,nin    &
+               &                ,data_ave,data_max,data_min,data_std,data_n,data_w,undef,weigth,weigth_ind,is_angle)
+  IMPLICIT NONE
+  INTEGER , INTENT(IN)           :: nx , ny , nz , nvar , nin
+  REAL(r_sngl),INTENT(IN)        :: dx , dy , dz , xini , yini , zini
+  REAL(r_sngl),INTENT(IN)        :: undef
+  REAL(r_sngl),INTENT(IN)        :: xin(nin),yin(nin),zin(nin),datain(nin,nvar)
+  LOGICAL     ,INTENT(IN)        :: weigth(nvar)
+  LOGICAL     ,INTENT(IN)        :: is_angle(nvar)
+  INTEGER     ,INTENT(IN)        :: weigth_ind(nvar)
+  REAL(r_sngl),INTENT(OUT)       :: data_ave(nx,ny,nz,nvar)
+  REAL(r_sngl),INTENT(OUT)       :: data_max(nx,ny,nz,nvar)
+  REAL(r_sngl),INTENT(OUT)       :: data_min(nx,ny,nz,nvar)
+  REAL(r_sngl),INTENT(OUT)       :: data_std(nx,ny,nz,nvar)
+  REAL(r_sngl),INTENT(OUT)       :: data_w(nx,ny,nz,nvar)
+  INTEGER,INTENT(OUT)            :: data_n(nx,ny,nz,nvar)
+  REAL(r_sngl)                   :: w(nin)
+  REAL(r_sngl)                   :: tmp_data
+
+  INTEGER                        :: ii , ix , iy , iz , iv
+
+
+data_n=0
+
+!private(tmp_data,w,ii,ix,iy,iz,iv)
+
+!$OMP PARALLEL DO SCHEDULE(DYNAMIC) PRIVATE( tmp_data,w,ii,ix,iy,iz,iv )
+
+DO iv = 1,nvar !Loop over the variables (we can perform OMP over this loop)
+
+  IF ( weigth(iv) )THEN
+     w = datain(:,weigth_ind(iv))
+  ELSE
+     w = 1.0e0
+  ENDIF 
+
+  DO ii = 1,nin  !Loop over the input data 
+
+    !Compute the location of the current point with in grid coordinates (rx,ry)
+    ix = int( ( xin(ii) - xini ) / dx ) + 1
+    iy = int( ( yin(ii) - yini ) / dy ) + 1
+    iz = int( ( zin(ii) - zini ) / dz ) + 1
+
+    !Check is the data is within the grid.
+    IF( ix <= nx .and. ix >= 1 .and. iy <= ny .and. iy >= 1 .and.   &
+        iz <= nz .and. iz >= 1 .and. datain(ii,iv) /= undef .and.   & 
+        w(ii) /= undef )THEN
+
+      IF(  data_n(ix,iy,iz,iv) == 0 )THEN
+        data_max(ix,iy,iz,iv) = datain(ii,iv)
+        data_min(ix,iy,iz,iv) = datain(ii,iv)
+        data_ave(ix,iy,iz,iv) = datain(ii,iv) * w(ii)
+        data_std(ix,iy,iz,iv) = ( datain(ii,iv) ** 2 )*w(ii)
+        data_w  (ix,iy,iz,iv) = w(ii)
+        data_n  (ix,iy,iz,iv) = 1
+
+      ELSE
+        data_w(ix,iy,iz,iv) = data_w(ix,iy,iz,iv) + w(ii)
+        data_n(ix,iy,iz,iv) = data_n(ix,iy,iz,iv) + 1
+        IF ( .not. is_angle(iv) )THEN
+            data_ave(ix,iy,iz,iv) = data_ave(ix,iy,iz,iv) + datain(ii,iv) * w(ii)
+            data_std(ix,iy,iz,iv) = data_std(ix,iy,iz,iv) + ( datain(ii,iv) ** 2 )*w(ii)
+        ELSE
+            CALL min_angle_distance( data_ave(ix,iy,iz,iv)/data_n(ix,iy,iz,iv) , datain(ii,iv) , tmp_data )
+            data_ave(ix,iy,iz,iv) = data_ave(ix,iy,iz,iv) + datain(ii,iv) * w(ii)
+            data_std(ix,iy,iz,iv) = data_std(ix,iy,iz,iv) + ( datain(ii,iv) ** 2 )*w(ii)
+        ENDIF
+
+
+        IF( datain(ii,iv) > data_max(ix,iy,iz,iv) )THEN
+          data_max(ix,iy,iz,iv) = datain(ii,iv)
+        ENDIF
+        IF( datain(ii,iv) < data_min(ix,iy,iz,iv) )THEN
+          data_min(ix,iy,iz,iv) = datain(ii,iv)
+        ENDIF
+
+      ENDIF
+
+
+    ENDIF
+
+  ENDDO
+
+  WHERE( data_n(:,:,:,iv) > 0)
+       data_ave(:,:,:,iv) = data_ave(:,:,:,iv) / REAL( data_n(:,:,:,iv) , r_sngl )
+       data_std(:,:,:,iv) = SQRT( data_std(:,:,:,iv)/REAL( data_n(:,:,:,iv) , r_sngl ) - data_ave(:,:,:,iv) ** 2 )
+  ENDWHERE
+
+  !If this is an angle check that the value is between 0-360.
+  IF( is_angle(iv) )THEN
+    WHERE( data_ave(:,:,:,iv) > 360.0e0 )
+       data_ave(:,:,:,iv) = data_ave(:,:,:,iv) - 360.0e0
+    ENDWHERE
+    WHERE( data_ave(:,:,:,iv) < 0.0e0 )
+       data_ave(:,:,:,iv) = data_ave(:,:,:,iv) + 360.0e0
+    ENDWHERE
+  ENDIF
+
+
+ENDDO
+
+!$OMP END PARALLEL DO
+
+END SUBROUTINE com_interp_boxavereg
+
+SUBROUTINE min_angle_distance( ref_val , val , corrected_val )
+IMPLICIT NONE
+REAL(r_sngl),INTENT(IN)  :: ref_val , val 
+REAL(r_sngl),INTENT(OUT) :: corrected_val
+REAL(r_sngl)             :: diff
+!Given two angles ref_val and val, find an angle equivalent to val that minimizes the distance between ref_val and val.
+!ref_val and val are [0-360], but corrected_val [-180,540]
+
+ diff = ref_val - val 
+ IF( diff > 180.0e0 )THEN
+   corrected_val = val + 360.0e0
+ ELSEIF( diff < -180.0e0 )THEN
+   corrected_val = val -360.0e0
+ ELSE
+   corrected_val = val
+ ENDIF
+
+END SUBROUTINE min_angle_distance
+
+
 END MODULE cs
