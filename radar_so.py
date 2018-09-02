@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import sys 
 import os
 sys.path.append( '../radar_so/fortran/' )
+import ntpath
 from cs  import cs   #Fortran code routines.
 
 class SoFields(object):
@@ -73,7 +74,7 @@ class SoFields(object):
                 #if 'reflectivity' in vars_data[var]['standard_name']:
                 if var == 'CZH':
                     vars_data[var]['data'] = np.power(10, vars_data[var]['data']/10.)
-            print(vars_data[var]['data'].shape)
+            #print(vars_data[var]['data'].shape)
 
         # Average data
         self.compute_grid_boxmean(vars_data)
@@ -123,13 +124,14 @@ class SoFields(object):
 
         #Reshape variables.
 
-        latin= np.reshape( self.radar.gate_longitude['data'] , na*nr )
-        lonin= np.reshape( self.radar.gate_latitude['data'] , na*nr )
+        latin= np.reshape( self.radar.gate_latitude['data'] , na*nr )
+        lonin= np.reshape( self.radar.gate_longitude['data'] , na*nr )
         zin  = np.reshape( self.radar.gate_altitude['data'] , na*nr )
 
         #Group all variables that will be "superobbed" into one single array.
         #This is to take advantage of paralellization. Different columns will be processed in parallel.
-        datain=np.zeros( ( na*nr , nvar + 3 ) )
+        datain  =np.zeros( ( na*nr , 4*nvar ) )
+        datamaskin=np.ones( ( na*nr , 4*nvar ) ).astype(bool)
 
         var_names = []
 
@@ -143,10 +145,7 @@ class SoFields(object):
             datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
             tmp_mask         =  np.reshape( variables[var]['data'].mask , na*nr )
             #Use the same undef value for all variables.
-            datain[:,4*iv+0][ np.logical_not( tmp_mask ) ]=local_undef
-            datain[:,4*iv+1][ np.logical_not( tmp_mask ) ]=local_undef
-            datain[:,4*iv+2][ np.logical_not( tmp_mask ) ]=local_undef
-            datain[:,4*iv+3][ np.logical_not( tmp_mask ) ]=local_undef
+            datamaskin[tmp_mask,4*iv:4*(iv+1)]=False
 
             if var == 'CZH' :
                w_i = 4*iv+3 #Reflectivity is the variable that can be used as a weight.
@@ -165,12 +164,21 @@ class SoFields(object):
         #data_std - standard deviation (can be used to filter some super obbs)
         #data_n   - number of samples  (can be used to filter some super obbs)
         #data_w   - sum of weigths
+
+        print('MAX, MIN before AVE')
+        print( np.max( datain[ datamaskin[:,3] ,3] ),  np.min( datain[ datamaskin[:,3] ,3] ) )
+        print( np.max( datain[ datamaskin[:,7] ,7] ),  np.min( datain[ datamaskin[:,7] ,7] ) )
+
         [data_ave , data_max , data_min , data_std , data_n , data_w ]=cs.com_interp_boxavereg(
-                             xini=z_ini,dx=dz,nx=nz,yini=lat_ini,dy=dlat,ny=nlat,
-                             zini=lon_ini  ,dz=dlon  ,nz=nlon  ,nvar=4*nvar,
-                             xin=zin,yin=latin,zin=lonin,datain=datain,nin=na*nr,   
-                             undef=local_undef,weigth=weigth,weigth_ind=weigth_ind,is_angle=is_angle)
+                             xini=lon_ini,dx=dlon,nx=nlon,yini=lat_ini,dy=dlat,ny=nlat,
+                             zini=z_ini  ,dz=dz  ,nz=nz  ,nvar=4*nvar,
+                             xin=lonin,yin=latin,zin=zin,datain=datain,datamaskin=datamaskin,nin=na*nr,   
+                             weigth=weigth,weigth_ind=weigth_ind,is_angle=is_angle)
         #TODO> Aca se puede poner un control de calidad que filtre en funcion de n o de la varianza.
+
+        print('MAX, MIN, after AVE')
+        #print( np.max( data_ave[ data_n[:,:,:,3] > 0 , 3 ] ) , np.min( data_ave[ data_n[:,:,:,3] > 0 , 3 ] ) )
+        #print( np.max( data_ave[ data_n[:,:,:,7] > 0 , 7 ] ) , np.min( data_ave[ data_n[:,:,:,7] > 0 , 7 ] ) )
 
         #"Unpack" the superobbed data.
         for iv , var in enumerate( variables )  :
@@ -179,8 +187,7 @@ class SoFields(object):
             self.fields['grid_' + var]['ra']=data_ave[:,:,:,2+iv*4]
             self.fields['grid_' + var]['data']=data_ave[:,:,:,3+iv*4]
             self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
-
-        print( self.fields['grid_' + var]['data'].shape )
+            print( np.max( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) , np.min( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) )
 
         #for ia in range(self.radar.nrays):
         #    for ir in range(self.radar.ngates):
@@ -410,7 +417,7 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
         radar = pyart.io.read(filename)
     else:
         radar = input
-    print(radar)
+    #print(radar)
 
     if outputpath == None  :
         outputpath='./'
@@ -418,8 +425,8 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
     os.makedirs( outputpath + '/letkf/',exist_ok=True)
 
     # Get reflectivity and Doppler velocity variable name
-    #vars_name = get_vars_name(radar)
-    vars_name = radar.fields.keys()
+    vars_name = get_vars_name(radar,options)
+    #vars_name = radar.fields.keys()
 
     # Get radar start and end times
     inidate, enddate = get_dates(radar)
@@ -430,6 +437,7 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
     #Loop over output files
     iray = 0
     inirayidx = 0
+    outfile_list = []
     for date in output_dates.keys():
 
         # Get radar rays that contribute to current date
@@ -438,59 +446,78 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
             iray += 1
         endrayidx = iray
         ray_limits = [inirayidx, endrayidx]
-        print(ray_limits)
+        #print(ray_limits)
 
         # Compute superobbing
         so = SoFields(radar, vars_name, ray_limits, grid_dims, options)
 
-        #original = pyart.io.read(file)
-        display = pyart.graph.RadarDisplay(radar)
-        print('PLOTTING ORIGINAL')
-        for sweep in range(radar.nsweeps):
-           fig = plt.figure()
-           display.plot_ppi('CZH', sweep=sweep)
-           plt.show()
+        #print('PLOTTING ORIGINAL')
+        #display = pyart.graph.RadarDisplay(radar)
+        #for sweep in range(radar.nsweeps):
+        #   fig = plt.figure()
+        #   display.plot_ppi('CZH', sweep=sweep)
+        #   plt.show()
 
-        print('DOING SO')
-        #so = SoFields(file, ['VRAD'], [0, original.nrays],[10e3, 1000, 25e3])
-
+        '''
         print('PLOTTING SO')
-        for lev in range(so.grid.nlev):
-           print(lev)
-           fig = plt.figure()
-           plt.pcolormesh(so.fields['grid_CZH']['data'][lev,:,:])
-           plt.colorbar()
-           plt.show()
-
-
-
-
+        for lev in so.fields['grid_CZH']: #sso.grid.nlev):
+           if lev != 'id' and lev != 'error' and lev != 'min':
+               print(lev)
+               fig = plt.figure()
+               plt.pcolormesh(so.fields['grid_CZH'][lev][3,:,:])
+               plt.colorbar()
+               plt.show() 
+        '''
 
         # Check if there is an exisiting file to update the box average
-        tmpfile = outputpath + '/' + radar.metadata['instrument_name'] +  date2str(date) + '.pkl'
+        tmpfile = outputpath + '/grid/' + radar.metadata['instrument_name'] + '_' + date2str(date) + '.pkl'
         if check_file_exists(tmpfile):
             print('Updating boxmean from previous file ' + tmpfile)
             tmp_so = load_object(tmpfile)
             update_boxaverage(tmp_so, so)
 
+        '''
+        print('PLOTTING SO')
+        for lev in so.fields['grid_CZH']: #sso.grid.nlev):
+           if lev != 'id' and lev != 'error' and lev != 'min':
+               print(lev)
+               fig = plt.figure()
+               plt.pcolormesh(so.fields['grid_CZH'][lev][3,:,:])
+               plt.colorbar()
+               plt.show()
+        '''
+
         # Write intermediate file
         write_object(tmpfile, so.fields)
 
         # Write LETKF file
-        outfile = outputpath + '/' + radar.metadata['instrument_name'] + date2str(date) + '.dat'
+        outfile = outputpath + '/letkf/' + radar.metadata['instrument_name'] + '_' + date2str(date) + '.dat'
+        outfile_list.append(ntpath.basename(outfile))
         write_letkf(outfile, so)
 
         inirayidx = iray
+     
+    return outfile_list 
 
-    return so
+def get_output_dates_list(dates):
+    '''
+    dates : dict of datetime objects
+    '''
+    datelist = []
+    for key in dates:
+       datelist.append(date2str(key))
+    return datelist
 
-def get_vars_name(obj):
+
+def get_vars_name(obj,options):
     """ Get reflectivity and Doppler veolocity names from radar object """
     variable_name = []
-    for key in obj.fields.keys():
-        if key != 'CM' and key != 'TV' and ('reflectivity' in obj.fields[key]['standard_name'] or \
-            'radial_velocity' in obj.fields[key]['standard_name']):
-            variable_name.append(key)
+    for key in obj.fields.keys()  :
+        if key in options.keys()  :
+              #if key != 'CM' and key != 'TV' and ('reflectivity' in obj.fields[key]['standard_name'] or \
+              #    'radial_velocity' in obj.fields[key]['standard_name']):
+           variable_name.append(key)
+           #print( variable_name )
     return variable_name
 
 def get_dates(obj):
@@ -552,7 +579,7 @@ def update_boxaverage(old_obj, new_obj):
         nobs_tot = nobs_old + nobs_new
         for subkey in new_obj.fields[key].keys():
             if subkey != 'nobs' and subkey != 'id' and subkey != 'error' and subkey != 'min':
-                print( nobs_old.shape , old_obj[key][subkey].shape )
+                #print( nobs_old.shape , old_obj[key][subkey].shape )
                 new_obj.fields[key][subkey] = \
                     np.ma.masked_invalid((nobs_new*new_obj.fields[key][subkey] +\
                     nobs_old*old_obj[key][subkey])/np.ma.masked_invalid(nobs_tot))
@@ -597,12 +624,12 @@ def write_letkf(filename, obj):
 
     for iv , var in enumerate(obj.fields.keys()) :
         if iv == 0 :
-           [nlon,nlat,nlev]=np.shape( obj.fields[var]['data'] )
-           tmp_data =np.zeros(( nlon,nlat,nlev,nvar))
-           tmp_az =np.zeros(( nlon,nlat,nlev,nvar))
-           tmp_ra =np.zeros(( nlon,nlat,nlev,nvar))
-           tmp_el =np.zeros(( nlon,nlat,nlev,nvar))
-           tmp_n  =np.zeros(( nlon,nlat,nlev,nvar)).astype(int)
+           [nlev,nlat,nlon]=np.shape( obj.fields[var]['data'] )
+           tmp_data =np.zeros(( nlev,nlat,nlon,nvar))
+           tmp_az =np.zeros(( nlev,nlat,nlon,nvar))
+           tmp_ra =np.zeros(( nlev,nlat,nlon,nvar))
+           tmp_el =np.zeros(( nlev,nlat,nlon,nvar))
+           tmp_n  =np.zeros(( nlev,nlat,nlon,nvar)).astype(int)
 
         tmp_data[:,:,:,iv] = obj.fields[var]['data']
         tmp_az  [:,:,:,iv] = obj.fields[var]['az']
@@ -611,6 +638,8 @@ def write_letkf(filename, obj):
         tmp_n   [:,:,:,iv] = obj.fields[var]['nobs']
         tmp_error     [iv] = obj.fields[var]['error']
         tmp_id        [iv] = obj.fields[var]['id']
+        #print( np.max( tmp_data ) , np.min( tmp_data ) )
+        #print( tmp_data.dtype )
 
     cs.write_radar(nlon=nlon,nlat=nlat,nlev=nlev,nvar=nvar,
                    data_in=tmp_data,ndata_in=tmp_n,
@@ -620,8 +649,6 @@ def write_letkf(filename, obj):
                    radar_lon=obj.radar.longitude['data'],
                    radar_lat=obj.radar.latitude['data'] ,
                    radar_z=obj.radar.altitude['data'] )
-
-        
 
     #   tmp_obs[iv*ngrid:(iv+1)*ngrid,0]= obj.fields[var]['id']
     #   tmp_obs[iv*ngrid:(iv+1)*ngrid,1]= np.reshape( obj.fields[var]['az'] , ngrid )
@@ -668,7 +695,7 @@ def str2date(string):
 
 def date2str(date):
     """ Datetime object to string with format %Y-%m-%dT%H:%M:%SZ """
-    return datetime.strftime(date, '%Y%m%d_%H%M%S')
+    return datetime.strftime(date, '%Y%m%d%H%M%S')
 
 def datespan(startDate, endDate, delta):
     '''
@@ -683,42 +710,11 @@ def datespan(startDate, endDate, delta):
         yield currentDate
         currentDate += delta
 
-def parse_dates(filename):
-    """ Get initial and final times from a radar filename """
-    ini = filename.split('_')[0].split('.')[1] + filename.split('_')[1].split('.')[0]
-    end = filename.split('_')[0].split('.')[1] + filename.split('_')[4].split('.')[0]
-
-    #Si llegara a ser necesario discriminar entre radares
-    #if 'PAR' in filename:
-        # cfrad.20091117_174348.000_to_20091117_174737.000_PAR_SUR.nc3
-    #elif 'ANG' in filename:
-        # cfrad.20100111_000003.000_to_20100111_000340.001_ANG240_v1_SUR.nc
-    #elif 'PER' in filename:
-    #elif 'RMA1' in filename:
-        # cfrad.20170926_171335.0000_to_20170926_171446.0000_RMA1_0122_03.nc3
-    #else:
-    #    raise ValueError('Radar not recognized')
-
-    return ini, end
-
-
-'''
-import struct
-
-data = [# your data]
-
-with open('your_data.dat', 'rb') as your_data_file:
-    values = struct.unpack('i'*len(data), your_data_file.read())
-
-with open('your_data.dat', 'wb') as your_dat_file:
-    your_dat_file.write(struct.pack('i'*len(data), *data))
-
-'''
 if __name__ == '__main__':
     file = 'cfrad.20091117_174348.000_to_20091117_174737.000_PAR_SUR.nc3'
     #file = './cfrad.20100111_000003.000_to_20100111_000340.001_ANG240_v1_SUR.nc'
     file = 'cfrad.20170926_171335.0000_to_20170926_171446.0000_RMA1_0122_03.nc3'
-    print(file)
+    #print(file)
 
     a = main_radar_so(file, 300, [2000, 2000, 25e3], {'ZH':[4001, 5, 0], 'VRAD':[4002, 2]})
 
