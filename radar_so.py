@@ -142,6 +142,8 @@ class SoFields(object):
             datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
             datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
 
+            print( np.shape( variables[var]['data'] ) )
+            print( np.shape( variables[var]['data'].mask ) )
             datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
             tmp_mask         =  np.reshape( variables[var]['data'].mask , na*nr )
             #Use the same undef value for all variables.
@@ -165,9 +167,9 @@ class SoFields(object):
         #data_n   - number of samples  (can be used to filter some super obbs)
         #data_w   - sum of weigths
 
-        print('MAX, MIN before AVE')
-        print( np.max( datain[ datamaskin[:,3] ,3] ),  np.min( datain[ datamaskin[:,3] ,3] ) )
-        print( np.max( datain[ datamaskin[:,7] ,7] ),  np.min( datain[ datamaskin[:,7] ,7] ) )
+        #print('MAX, MIN before AVE')
+        #print( np.max( datain[ datamaskin[:,3] ,3] ),  np.min( datain[ datamaskin[:,3] ,3] ) )
+        #print( np.max( datain[ datamaskin[:,7] ,7] ),  np.min( datain[ datamaskin[:,7] ,7] ) )
 
         [data_ave , data_max , data_min , data_std , data_n , data_w ]=cs.com_interp_boxavereg(
                              xini=lon_ini,dx=dlon,nx=nlon,yini=lat_ini,dy=dlat,ny=nlat,
@@ -176,7 +178,6 @@ class SoFields(object):
                              weigth=weigth,weigth_ind=weigth_ind,is_angle=is_angle)
         #TODO> Aca se puede poner un control de calidad que filtre en funcion de n o de la varianza.
 
-        print('MAX, MIN, after AVE')
         #print( np.max( data_ave[ data_n[:,:,:,3] > 0 , 3 ] ) , np.min( data_ave[ data_n[:,:,:,3] > 0 , 3 ] ) )
         #print( np.max( data_ave[ data_n[:,:,:,7] > 0 , 7 ] ) , np.min( data_ave[ data_n[:,:,:,7] > 0 , 7 ] ) )
 
@@ -187,7 +188,7 @@ class SoFields(object):
             self.fields['grid_' + var]['ra']=data_ave[:,:,:,2+iv*4]
             self.fields['grid_' + var]['data']=data_ave[:,:,:,3+iv*4]
             self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
-            print( np.max( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) , np.min( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) )
+            #print( np.max( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) , np.min( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) )
 
         #for ia in range(self.radar.nrays):
         #    for ir in range(self.radar.ngates):
@@ -430,23 +431,27 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
 
     # Get radar start and end times
     inidate, enddate = get_dates(radar)
-
     # Create output files list according to out_freq
     output_dates = get_letkf_outputs(inidate, enddate, output_freq)
-
     #Loop over output files
     iray = 0
     inirayidx = 0
     outfile_list = []
-    for date in output_dates.keys():
+    for mydate in output_dates :
 
         # Get radar rays that contribute to current date
-        diff = (output_dates[date][1]-inidate).total_seconds()
-        while iray < radar.nrays and np.abs(radar.time['data'][iray] - diff) > 1e-3:
-            iray += 1
-        endrayidx = iray
-        ray_limits = [inirayidx, endrayidx]
-        #print(ray_limits)
+        top_second = ( ( mydate + timedelta(seconds=output_freq/2.0) ) - inidate ).total_seconds()
+        bot_second = ( ( mydate - timedelta(seconds=output_freq/2.0) ) - inidate ).total_seconds()
+
+        my_rays=np.squeeze( np.where( np.logical_and( radar.time['data'] >= bot_second , radar.time['data'] <= top_second ) ) )
+
+        #diff = (output_dates[date][1]-inidate).total_seconds()
+        #while iray < radar.nrays and np.abs(radar.time['data'][iray] - diff) > 1e-3  :
+        #    iray += 1
+        #endrayidx = iray
+        #ray_limits = [inirayidx, endrayidx]
+        ray_limits = [ my_rays[0] , my_rays[-1] ]
+        print( ray_limits )
 
         # Compute superobbing
         so = SoFields(radar, vars_name, ray_limits, grid_dims, options)
@@ -470,7 +475,8 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
         '''
 
         # Check if there is an exisiting file to update the box average
-        tmpfile = outputpath + '/grid/' + radar.metadata['instrument_name'] + '_' + date2str(date) + '.pkl'
+        tmpfile = outputpath + '/grid/' + radar.metadata['instrument_name'] + '_' + date2str(mydate) + '.pkl'
+        
         if check_file_exists(tmpfile):
             print('Updating boxmean from previous file ' + tmpfile)
             tmp_so = load_object(tmpfile)
@@ -491,7 +497,7 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
         write_object(tmpfile, so.fields)
 
         # Write LETKF file
-        outfile = outputpath + '/letkf/' + radar.metadata['instrument_name'] + '_' + date2str(date) + '.dat'
+        outfile = outputpath + '/letkf/' + radar.metadata['instrument_name'] + '_' + date2str(mydate) + '.dat'
         outfile_list.append(ntpath.basename(outfile))
         write_letkf(outfile, so)
 
