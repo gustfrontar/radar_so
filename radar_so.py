@@ -434,7 +434,9 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
         top_second = ( ( mydate + timedelta(seconds=output_freq/2.0) ) - inidate ).total_seconds()
         bot_second = ( ( mydate - timedelta(seconds=output_freq/2.0) ) - inidate ).total_seconds()
 
-        my_rays= np.squeeze( np.where( np.logical_and( radar.time['data'] >= bot_second , radar.time['data'] <= top_second ) ) ) 
+        my_rays= np.squeeze( np.where( np.logical_and( radar.time['data'] >= bot_second , radar.time['data'] < top_second ) ) ) 
+
+        print(radar.time['data'])
 
         #diff = (output_dates[date][1]-inidate).total_seconds()
         #while iray < radar.nrays and np.abs(radar.time['data'][iray] - diff) > 1e-3  :
@@ -572,16 +574,20 @@ def check_file_exists(filename):
 def update_boxaverage(old_obj, new_obj):
     """ Update superobbing object with previous data """
     for key in new_obj.fields.keys():
-        nobs_old = old_obj[key]['nobs']
-        nobs_new = new_obj.fields[key]['nobs']
-        nobs_tot = nobs_old + nobs_new
-        for subkey in new_obj.fields[key].keys():
-            if subkey != 'nobs' and subkey != 'id' and subkey != 'error' and subkey != 'min':
-                #print( nobs_old.shape , old_obj[key][subkey].shape )
-                new_obj.fields[key][subkey] = \
-                    np.ma.masked_invalid((nobs_new*new_obj.fields[key][subkey] +\
-                    nobs_old*old_obj[key][subkey])/np.ma.masked_invalid(nobs_tot))
-        new_obj.fields[key]['nobs'] = nobs_tot
+        #Check if the current key is present in the old_object.
+        #If so merge the two objects.
+        if key in old_obj.keys()  :
+           nobs_old = old_obj[key]['nobs']
+           nobs_new = new_obj.fields[key]['nobs']
+           nobs_tot = nobs_old + nobs_new
+
+           for subkey in new_obj.fields[key].keys():
+               if subkey != 'nobs' and subkey != 'id' and subkey != 'error' and subkey != 'min':
+                   #print( nobs_old.shape , old_obj[key][subkey].shape )
+                   new_obj.fields[key][subkey] = \
+                      np.ma.masked_invalid((nobs_new*new_obj.fields[key][subkey] +\
+                      nobs_old*old_obj[key][subkey])/np.ma.masked_invalid(nobs_tot))
+           new_obj.fields[key]['nobs'] = nobs_tot
 
 def write_object(filename, obj):
     print('WRITING PICKLE FILE ' + filename)
