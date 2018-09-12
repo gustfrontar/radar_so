@@ -143,9 +143,8 @@ class SoFields(object):
             datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
 
             datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
-            tmp_mask         =  np.reshape( variables[var]['data'].mask , na*nr )
-            #Use the same undef value for all variables.
-            datamaskin[tmp_mask,4*iv:4*(iv+1)]=False
+            datamaskin[:,4*iv:4*(iv+1)] = np.ones([na*nr,4]).astype(bool)
+            datamaskin[ datain[:,4*iv+3] == variables[var]['_FillValue'] , 4*iv:4*(iv+1) ]=False
 
             if var == 'CZH' :
                w_i = 4*iv+3 #Reflectivity is the variable that can be used as a weight.
@@ -418,6 +417,7 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
 
     # Get reflectivity and Doppler velocity variable name
     vars_name = get_vars_name(radar,options)
+    print(vars_name)
     #vars_name = radar.fields.keys()
 
     # Get radar start and end times
@@ -434,65 +434,66 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
         top_second = ( ( mydate + timedelta(seconds=output_freq/2.0) ) - inidate ).total_seconds()
         bot_second = ( ( mydate - timedelta(seconds=output_freq/2.0) ) - inidate ).total_seconds()
 
-        my_rays=np.squeeze( np.where( np.logical_and( radar.time['data'] >= bot_second , radar.time['data'] <= top_second ) ) )
+        my_rays= np.squeeze( np.where( np.logical_and( radar.time['data'] >= bot_second , radar.time['data'] <= top_second ) ) ) 
 
         #diff = (output_dates[date][1]-inidate).total_seconds()
         #while iray < radar.nrays and np.abs(radar.time['data'][iray] - diff) > 1e-3  :
         #    iray += 1
         #endrayidx = iray
         #ray_limits = [inirayidx, endrayidx]
-        ray_limits = [ my_rays[0] , my_rays[-1] ]
-        print( ray_limits )
+        if np.size( my_rays ) > 1 :
+           ray_limits = [ my_rays[0] , my_rays[-1] ]
+           print( ray_limits )
 
-        # Compute superobbing
-        so = SoFields(radar, vars_name, ray_limits, grid_dims, options)
+           # Compute superobbing
+           so = SoFields(radar, vars_name, ray_limits, grid_dims, options)
 
-        #print('PLOTTING ORIGINAL')
-        #display = pyart.graph.RadarDisplay(radar)
-        #for sweep in range(radar.nsweeps):
-        #   fig = plt.figure()
-        #   display.plot_ppi('CZH', sweep=sweep)
-        #   plt.show()
+           #print('PLOTTING ORIGINAL')
+           #display = pyart.graph.RadarDisplay(radar)
+           #for sweep in range(radar.nsweeps):
+           #   fig = plt.figure()
+           #   display.plot_ppi('CZH', sweep=sweep)
+           #   plt.show()
 
-        '''
-        print('PLOTTING SO')
-        for lev in so.fields['grid_CZH']: #sso.grid.nlev):
-           if lev != 'id' and lev != 'error' and lev != 'min':
-               print(lev)
-               fig = plt.figure()
-               plt.pcolormesh(so.fields['grid_CZH'][lev][3,:,:])
-               plt.colorbar()
-               plt.show() 
-        '''
+           '''
+           print('PLOTTING SO')
+           for lev in so.fields['grid_CZH']: #sso.grid.nlev):
+              if lev != 'id' and lev != 'error' and lev != 'min':
+                  print(lev)
+                  fig = plt.figure()
+                  plt.pcolormesh(so.fields['grid_CZH'][lev][3,:,:])
+                  plt.colorbar()
+                  plt.show() 
+           '''
 
-        # Check if there is an exisiting file to update the box average
-        tmpfile = outputpath + '/grid/' + radar.metadata['instrument_name'] + '_' + date2str(mydate) + '.pkl'
+           # Check if there is an exisiting file to update the box average
+           tmpfile = outputpath + '/grid/' + radar.metadata['instrument_name'] + '_' + date2str(mydate) + '.pkl'
         
-        if check_file_exists(tmpfile):
-            print('Updating boxmean from previous file ' + tmpfile)
-            tmp_so = load_object(tmpfile)
-            update_boxaverage(tmp_so, so)
+           if check_file_exists(tmpfile):
+               print('Updating boxmean from previous file ' + tmpfile)
+               tmp_so = load_object(tmpfile)
+               update_boxaverage(tmp_so, so)
 
-        '''
-        print('PLOTTING SO')
-        for lev in so.fields['grid_CZH']: #sso.grid.nlev):
-           if lev != 'id' and lev != 'error' and lev != 'min':
-               print(lev)
-               fig = plt.figure()
-               plt.pcolormesh(so.fields['grid_CZH'][lev][3,:,:])
-               plt.colorbar()
-               plt.show()
-        '''
+           '''
+           print('PLOTTING SO')
+           for lev in so.fields['grid_CZH']: #sso.grid.nlev):
+              if lev != 'id' and lev != 'error' and lev != 'min':
+                  print(lev)
+                  fig = plt.figure()
+                  plt.pcolormesh(so.fields['grid_CZH'][lev][3,:,:])
+                  plt.colorbar()
+                  plt.show()
+           '''
 
-        # Write intermediate file
-        write_object(tmpfile, so.fields)
+           # Write intermediate file
+           write_object(tmpfile, so.fields)
 
-        # Write LETKF file
-        outfile = outputpath + '/letkf/' + radar.metadata['instrument_name'] + '_' + date2str(mydate) + '.dat'
-        outfile_list.append(ntpath.basename(outfile))
-        write_letkf(outfile, so)
+           # Write LETKF file
+           outfile = outputpath + '/letkf/' + radar.metadata['instrument_name'] + '_' + date2str(mydate) + '.dat'
+           outfile_list.append(ntpath.basename(outfile))
+           write_letkf(outfile, so)
 
-        inirayidx = iray
+           inirayidx = iray
      
     return outfile_list 
 
