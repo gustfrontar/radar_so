@@ -114,12 +114,14 @@ DO ii=1,nin
   ENDDO
 ENDDO
 
+
 data_max=undef
 data_min=undef
 data_ave=undef
 data_std=undef
 data_w  =undef
 data_n  =0
+
 
 !private(tmp_data,w,ii,ix,iy,iz,iv)
 
@@ -132,6 +134,7 @@ DO iv = 1,nvar !Loop over the variables (we can perform OMP over this loop)
   ELSE
      w = 1.0e0
   ENDIF 
+
 
   DO ii = 1,nin  !Loop over the input data 
 

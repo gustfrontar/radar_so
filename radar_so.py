@@ -142,8 +142,6 @@ class SoFields(object):
             datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
             datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
 
-            print( np.shape( variables[var]['data'] ) )
-            print( np.shape( variables[var]['data'].mask ) )
             datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
             tmp_mask         =  np.reshape( variables[var]['data'].mask , na*nr )
             #Use the same undef value for all variables.
@@ -159,6 +157,7 @@ class SoFields(object):
         is_angle[range(0,4*nvar,4)]=True        #Azimuths will be treated as angles.
 
 
+
         #The function outputs 
         #data_ave - weigthed average
         #data_max - maximum value
@@ -167,19 +166,11 @@ class SoFields(object):
         #data_n   - number of samples  (can be used to filter some super obbs)
         #data_w   - sum of weigths
 
-        #print('MAX, MIN before AVE')
-        #print( np.max( datain[ datamaskin[:,3] ,3] ),  np.min( datain[ datamaskin[:,3] ,3] ) )
-        #print( np.max( datain[ datamaskin[:,7] ,7] ),  np.min( datain[ datamaskin[:,7] ,7] ) )
-
         [data_ave , data_max , data_min , data_std , data_n , data_w ]=cs.com_interp_boxavereg(
                              xini=lon_ini,dx=dlon,nx=nlon,yini=lat_ini,dy=dlat,ny=nlat,
                              zini=z_ini  ,dz=dz  ,nz=nz  ,nvar=4*nvar,
                              xin=lonin,yin=latin,zin=zin,datain=datain,datamaskin=datamaskin,nin=na*nr,   
                              weigth=weigth,weigth_ind=weigth_ind,is_angle=is_angle)
-        #TODO> Aca se puede poner un control de calidad que filtre en funcion de n o de la varianza.
-
-        #print( np.max( data_ave[ data_n[:,:,:,3] > 0 , 3 ] ) , np.min( data_ave[ data_n[:,:,:,3] > 0 , 3 ] ) )
-        #print( np.max( data_ave[ data_n[:,:,:,7] > 0 , 7 ] ) , np.min( data_ave[ data_n[:,:,:,7] > 0 , 7 ] ) )
 
         #"Unpack" the superobbed data.
         for iv , var in enumerate( variables )  :
@@ -646,6 +637,11 @@ def write_letkf(filename, obj):
         tmp_id        [iv] = obj.fields[var]['id']
         #print( np.max( tmp_data ) , np.min( tmp_data ) )
         #print( tmp_data.dtype )
+
+
+    #Filter grid points in which the number of data points is less than min_n observations
+    min_n = 10  #TODO this should became an input parameter
+    tmp_n[ tmp_n < min_n ]=0
 
     cs.write_radar(nlon=nlon,nlat=nlat,nlev=nlev,nvar=nvar,
                    data_in=tmp_data,ndata_in=tmp_n,
