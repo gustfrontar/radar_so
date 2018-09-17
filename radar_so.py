@@ -436,8 +436,6 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
 
         my_rays= np.squeeze( np.where( np.logical_and( radar.time['data'] >= bot_second , radar.time['data'] < top_second ) ) ) 
 
-        print(radar.time['data'])
-
         #diff = (output_dates[date][1]-inidate).total_seconds()
         #while iray < radar.nrays and np.abs(radar.time['data'][iray] - diff) > 1e-3  :
         #    iray += 1
@@ -445,7 +443,7 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
         #ray_limits = [inirayidx, endrayidx]
         if np.size( my_rays ) > 1 :
            ray_limits = [ my_rays[0] , my_rays[-1] ]
-           print( ray_limits )
+           #print( ray_limits )
 
            # Compute superobbing
            so = SoFields(radar, vars_name, ray_limits, grid_dims, options)
@@ -534,32 +532,35 @@ def get_letkf_outputs(inidate, enddate, freq):
     initime, endtime : datetime objects
     out_freq : int in seconds
     """
-    if freq < 3600:
-        # Get first possible output date
-        inirounddate = datetime(inidate.year, inidate.month, inidate.day, inidate.hour, 0, 0)
-        freqtimes = round((inidate-inirounddate).total_seconds()/freq)
-        outputini = inirounddate + timedelta(seconds=freqtimes*freq)
+    ref_date =  datetime(inidate.year, inidate.month, 0, 0, 0, 0)
 
-        # Get last possible output date
-        endrounddate = datetime(inidate.year, inidate.month, inidate.day, inidate.hour+1, 0, 0)
-        freqtimes = round((endrounddate-enddate).total_seconds()/freq)
-        outputend = endrounddate - timedelta(seconds=freqtimes*freq)
+    #if freq < 3600:
+    # Get first possible output date
+    #inirounddate = datetime(inidate.year, inidate.month, inidate.day, inidate.hour, 0, 0)
+    freqtimes = freq*round((inidate-ref_date).total_seconds()/freq)
+    outputini = inirounddate + timedelta(seconds=freqtimes)
 
-        # Create output list
-        delta = timedelta(seconds=freq)
-        output_dates = defaultdict(list)
-        for date in datespan(outputini, outputend+delta, delta):
-            iniinterval = date - timedelta(seconds=freq/2)
-            endinterval = date + timedelta(seconds=freq/2)
-            output_dates[date] = [iniinterval, endinterval]
+    # Get last possible output date
+    
+    #endrounddate = datetime(inidate.year, inidate.month, inidate.day, inidate.hour+1, 0, 0)
+    freqtimes = freq*round((endrounddate-ref_date).total_seconds()/freq)
+    outputend = endrounddate - timedelta(seconds=freqtimes)
 
-        # Check radar intial and final dates are in output list
-        check_date_in_interval(inidate, output_dates[outputini][0], output_dates[outputini][1])
-        check_date_in_interval(enddate, output_dates[outputend][0], output_dates[outputend][1])
+    # Create output list
+    delta = timedelta(seconds=freq)
+    output_dates = defaultdict(list)
+    for date in datespan(outputini, outputend+delta, delta):
+        iniinterval = date - timedelta(seconds=freq/2)
+        endinterval = date + timedelta(seconds=freq/2)
+        output_dates[date] = [iniinterval, endinterval]
 
-        return output_dates
-    else:
-        raise ValueError('Not a valid output frequency:' + freq)
+    # Check radar intial and final dates are in output list
+    check_date_in_interval(inidate, output_dates[outputini][0], output_dates[outputini][1])
+    check_date_in_interval(enddate, output_dates[outputend][0], output_dates[outputend][1])
+
+    return output_dates
+    #else:
+    #    raise ValueError('Not a valid output frequency:' + freq)
 
 def check_date_in_interval(date, lower, upper):
     if not lower <= date <= upper:
