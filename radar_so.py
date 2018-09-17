@@ -532,19 +532,19 @@ def get_letkf_outputs(inidate, enddate, freq):
     initime, endtime : datetime objects
     out_freq : int in seconds
     """
-    ref_date =  datetime(inidate.year, inidate.month, 0, 0, 0, 0)
+    ref_date =  datetime(inidate.year, inidate.month, 1, 0, 0, 0)
 
     #if freq < 3600:
     # Get first possible output date
     #inirounddate = datetime(inidate.year, inidate.month, inidate.day, inidate.hour, 0, 0)
     freqtimes = freq*round((inidate-ref_date).total_seconds()/freq)
-    outputini = inirounddate + timedelta(seconds=freqtimes)
+    outputini = ref_date + timedelta(seconds=freqtimes)
 
     # Get last possible output date
     
     #endrounddate = datetime(inidate.year, inidate.month, inidate.day, inidate.hour+1, 0, 0)
-    freqtimes = freq*round((endrounddate-ref_date).total_seconds()/freq)
-    outputend = endrounddate - timedelta(seconds=freqtimes)
+    freqtimes = freq*round((enddate-ref_date).total_seconds()/freq)
+    outputend = ref_date + timedelta(seconds=freqtimes)
 
     # Create output list
     delta = timedelta(seconds=freq)
