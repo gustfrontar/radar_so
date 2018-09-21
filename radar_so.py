@@ -135,6 +135,11 @@ class SoFields(object):
 
         var_names = []
 
+        weigth=np.zeros( 4*nvar ).astype(bool)  #This flag decides wether the superobbing will be weigthed by the reflectivity or not (for each variable)
+        weigth_ind=np.zeros( 4*nvar )
+        weigth_vars=True  #TODO this should go to the configuration. (Enable or disable reflectivity weithning)
+        w_i=0
+
         for iv , var in enumerate( variables )  :
 
             #TODO chequear que esto esta bien y que es consitente con el reshape que viene despues.
@@ -146,16 +151,14 @@ class SoFields(object):
             datamaskin[:,4*iv:4*(iv+1)] = np.ones([na*nr,4]).astype(bool)
             datamaskin[ datain[:,4*iv+3] == variables[var]['_FillValue'] , 4*iv:4*(iv+1) ]=False
 
-            if var == 'CZH' :
+            if var == 'CHZ' and weigth_vars :   #TODO Replace CHZ by the "reflectivity name"
                w_i = 4*iv+3 #Reflectivity is the variable that can be used as a weight.
+               weigth=np.ones( 4*nvar ).astype(bool) 
+               weigth[w_i-4:w_i]=False                 #Do not weigth the reflectivity.
+               weigth_ind=np.ones( 4*nvar )*w_i
 
-        weigth=np.zeros( 4*nvar ).astype(bool)  #This flag decides wether the superobbing will be weigthed by the reflectivity or not (for each variable)
-        weigth[w_i-4:w_i]=False                 #Do not weigth the reflectivity.
-        weigth_ind=np.ones( 4*nvar )*w_i
         is_angle=np.zeros( 4*nvar )             #This flag decides if variable will be treated as an angle in the superobbing (usually true for the azimuth)
         is_angle[range(0,4*nvar,4)]=True        #Azimuths will be treated as angles.
-
-
 
         #The function outputs 
         #data_ave - weigthed average
@@ -180,42 +183,6 @@ class SoFields(object):
             self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
             #print( np.max( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) , np.min( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) )
 
-        #for ia in range(self.radar.nrays):
-        #    for ir in range(self.radar.ngates):
-        #
-        #        # Get i, j, k using a very simple approach since we are assuming
-        #        # a regular lat/lon/z grid
-        #        [k, j, i] = self._radar2grid(ia, ir)
-        #
-        #        # Skip data outside the grid domain
-        #        if self._check_point_in_grid(i, j, k):
-        #            for var in variables.keys():
-        #                if not np.ma.is_masked(variables[var]['data'][ia, ir]):
-        #                    self.fields['grid_' + var]['data'][k, j, i] += \
-        #                        variables[var]['data'][ia, ir]
-        #                    self.fields['grid_' + var]['nobs'][k, j, i] += 1
-        #                    self.fields['grid_' + var]['az'][k, j, i] += \
-        #                        self.radar.azimuth['data'][ia]
-        #                    self.fields['grid_' + var]['el'][k, j, i] += \
-        #                        self.radar.elevation['data'][ia]
-        #                    self.fields['grid_' + var]['ra'][k, j, i] += \
-        #                        self.radar.range['data'][ir]
-
-        # Compute observations boxaverage
-        #print('Averaging')
-        #for var in variables.keys():
-        #    nobs = self.fields['grid_' + var]['nobs']
-        #    for key in self.fields['grid_' + var].keys():
-        #        if key != 'nobs' and key != 'id' and key != 'error' and key != 'min':
-        #            self.fields['grid_' + var][key][nobs > 0] = \
-        #                self.fields['grid_' + var][key][nobs > 0]/nobs[nobs > 0]
-
-        #    # Power to DBZ
-        #    #if var == 'TH' or var == 'dBZ':
-        #    if var == 'CTH':
-        #        tmp = self.fields['grid_' + var]['data']
-        #        tmp[tmp > 0] = 10*np.log10(tmp[tmp > 0])
-        #        tmp[tmp <= 0] = self.fields['grid_' + var]['min']
 
     #*********************
     # Auxiliary functions
