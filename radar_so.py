@@ -137,7 +137,7 @@ class SoFields(object):
 
         weigth=np.zeros( 4*nvar ).astype(bool)  #This flag decides wether the superobbing will be weigthed by the reflectivity or not (for each variable)
         weigth_ind=np.zeros( 4*nvar )
-        weigth_vars=True  #TODO this should go to the configuration. (Enable or disable reflectivity weithning)
+        weigth_vars=False  #TODO this should go to the configuration. (Enable or disable reflectivity weithning)
         w_i=0
 
         for iv , var in enumerate( variables )  :
@@ -395,6 +395,11 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
     iray = 0
     inirayidx = 0
     outfile_list = []
+
+    if not vars_name  :
+
+       return outfile_list
+
     for mydate in output_dates :
 
         # Get radar rays that contribute to current date
@@ -613,7 +618,7 @@ def write_letkf(filename, obj):
         #print( np.max( tmp_data ) , np.min( tmp_data ) )
         #print( tmp_data.dtype )
 
-
+    print( np.max( tmp_n ) , np.sum( tmp_n ) , np.sum( tmp_n > 0 ) )
     #Filter grid points in which the number of data points is less than min_n observations
     min_n = 10  #TODO this should became an input parameter
     tmp_n[ tmp_n < min_n ]=0
