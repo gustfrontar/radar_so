@@ -100,8 +100,6 @@ class SoFields(object):
         ----------
         variables : list of numpy array
         """
-        print('BOX AVERAGE')
-        print('Adding')
 
         nr=self.radar.ngates
         na=self.radar.nrays
@@ -147,9 +145,9 @@ class SoFields(object):
             datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
             datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
 
-            datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
-            datamaskin[:,4*iv:4*(iv+1)] = np.ones([na*nr,4]).astype(bool)
-            datamaskin[ datain[:,4*iv+3] == variables[var]['_FillValue'] , 4*iv:4*(iv+1) ]=False
+            datain[:,4*iv+3] =  np.reshape( variables[var]['data'].data , na*nr )
+            tmp_mask = np.reshape( variables[var]['data'].mask , na*nr )
+            datain[tmp_mask,4*iv:4*(iv+1)] = local_undef
 
             if var == 'CHZ' and weigth_vars :   #TODO Replace CHZ by the "reflectivity name"
                w_i = 4*iv+3 #Reflectivity is the variable that can be used as a weight.
@@ -168,10 +166,11 @@ class SoFields(object):
         #data_n   - number of samples  (can be used to filter some super obbs)
         #data_w   - sum of weigths
 
+        print('Doing average')
         [data_ave , data_max , data_min , data_std , data_n , data_w ]=cs.com_interp_boxavereg(
                              xini=lon_ini,dx=dlon,nx=nlon,yini=lat_ini,dy=dlat,ny=nlat,
                              zini=z_ini  ,dz=dz  ,nz=nz  ,nvar=4*nvar,
-                             xin=lonin,yin=latin,zin=zin,datain=datain,datamaskin=datamaskin,nin=na*nr,   
+                             xin=lonin,yin=latin,zin=zin,datain=datain,undef=local_undef,nin=na*nr,   
                              weigth=weigth,weigth_ind=weigth_ind,is_angle=is_angle)
 
         #"Unpack" the superobbed data.

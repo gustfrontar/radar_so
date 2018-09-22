@@ -81,14 +81,13 @@ END SUBROUTINE write_radar
 
 
 !2D interpolation using box average. Destination grid is assumed to be regular.
-SUBROUTINE com_interp_boxavereg(xini,dx,nx,yini,dy,ny,zini,dz,nz,nvar,xin,yin,zin,datain,datamaskin,nin    &
+SUBROUTINE com_interp_boxavereg(xini,dx,nx,yini,dy,ny,zini,dz,nz,nvar,xin,yin,zin,datain,undef,nin    &
                &                ,data_ave,data_max,data_min,data_std,data_n,data_w,weigth,weigth_ind,is_angle)
   IMPLICIT NONE
   INTEGER , INTENT(IN)           :: nx , ny , nz , nvar , nin
   REAL(r_sngl),INTENT(IN)        :: dx , dy , dz , xini , yini , zini
-  REAL(r_sngl)                   :: undef
   REAL(r_sngl),INTENT(IN)        :: xin(nin),yin(nin),zin(nin),datain(nin,nvar)
-  LOGICAL     ,INTENT(IN)        :: datamaskin(nin,nvar)
+  REAL(r_sngl),INTENT(IN)        :: undef
   LOGICAL     ,INTENT(IN)        :: weigth(nvar)
   LOGICAL     ,INTENT(IN)        :: is_angle(nvar)
   INTEGER     ,INTENT(IN)        :: weigth_ind(nvar)
@@ -99,21 +98,9 @@ SUBROUTINE com_interp_boxavereg(xini,dx,nx,yini,dy,ny,zini,dz,nz,nvar,xin,yin,zi
   REAL(r_sngl),INTENT(OUT)       :: data_w(nz,ny,nx,nvar)
   INTEGER,INTENT(OUT)            :: data_n(nz,ny,nx,nvar)
   REAL(r_sngl)                   :: w(nin)
-  REAL(r_sngl)                   :: tmp_data , tmpdatain(nin,nvar)
+  REAL(r_sngl)                   :: tmp_data 
 
-  INTEGER                        :: ii , ix , iy , iz , iv
-
-
-tmpdatain=datain
-
-DO ii=1,nin
-  DO iv=1,nvar
-    IF( .not. datamaskin(ii,iv) )THEN
-       tmpdatain(ii,iv) = undef
-    ENDIF
-  ENDDO
-ENDDO
-
+  INTEGER                        :: ii , ix , iy , iz , iv , tmp_n
 
 data_max=undef
 data_min=undef
@@ -123,14 +110,12 @@ data_w  =undef
 data_n  =0
 
 
-!private(tmp_data,w,ii,ix,iy,iz,iv)
-
 !$OMP PARALLEL DO SCHEDULE(DYNAMIC) PRIVATE( tmp_data,w,ii,ix,iy,iz,iv )
 
 DO iv = 1,nvar !Loop over the variables (we can perform OMP over this loop)
 
   IF ( weigth(iv) )THEN
-     w = tmpdatain(:,weigth_ind(iv))
+     w = datain(:,weigth_ind(iv))
   ELSE
      w = 1.0e0
   ENDIF 
@@ -145,14 +130,14 @@ DO iv = 1,nvar !Loop over the variables (we can perform OMP over this loop)
 
     !Check is the data is within the grid.
     IF( ix <= nx .and. ix >= 1 .and. iy <= ny .and. iy >= 1 .and.   &
-        iz <= nz .and. iz >= 1 .and. tmpdatain(ii,iv) /= undef .and.   & 
+        iz <= nz .and. iz >= 1 .and. datain(ii,iv) /= undef .and.   & 
         w(ii) /= undef )THEN
 
-      IF(  data_n(ix,iy,iz,iv) == 0 )THEN
-        data_max(iz,iy,ix,iv) = tmpdatain(ii,iv)
-        data_min(iz,iy,ix,iv) = tmpdatain(ii,iv)
-        data_ave(iz,iy,ix,iv) = tmpdatain(ii,iv) * w(ii)
-        data_std(iz,iy,ix,iv) = ( tmpdatain(ii,iv) ** 2 )*w(ii)
+      IF(  data_n(iz,iy,ix,iv) == 0 )THEN
+        data_max(iz,iy,ix,iv) = datain(ii,iv)
+        data_min(iz,iy,ix,iv) = datain(ii,iv)
+        data_ave(iz,iy,ix,iv) = datain(ii,iv) * w(ii)
+        data_std(iz,iy,ix,iv) = ( datain(ii,iv) ** 2 )*w(ii)
         data_w  (iz,iy,ix,iv) = w(ii)
         data_n  (iz,iy,ix,iv) = 1
 
@@ -160,20 +145,20 @@ DO iv = 1,nvar !Loop over the variables (we can perform OMP over this loop)
         data_w(iz,iy,ix,iv) = data_w(iz,iy,ix,iv) + w(ii)
         data_n(iz,iy,ix,iv) = data_n(iz,iy,ix,iv) + 1
         IF ( .not. is_angle(iv) )THEN
-            data_ave(iz,iy,ix,iv) = data_ave(iz,iy,ix,iv) + tmpdatain(ii,iv) * w(ii)
-            data_std(iz,iy,ix,iv) = data_std(iz,iy,ix,iv) + ( tmpdatain(ii,iv) ** 2 )*w(ii)
+            data_ave(iz,iy,ix,iv) = data_ave(iz,iy,ix,iv) + datain(ii,iv) * w(ii)
+            data_std(iz,iy,ix,iv) = data_std(iz,iy,ix,iv) + ( datain(ii,iv) ** 2 )*w(ii)
         ELSE
-            CALL min_angle_distance( data_ave(iz,iy,ix,iv)/data_n(iz,iy,ix,iv) , tmpdatain(ii,iv) , tmp_data )
-            data_ave(iz,iy,ix,iv) = data_ave(iz,iy,ix,iv) + tmpdatain(ii,iv) * w(ii)
-            data_std(iz,iy,ix,iv) = data_std(iz,iy,ix,iv) + ( tmpdatain(ii,iv) ** 2 )*w(ii)
+            CALL min_angle_distance( data_ave(iz,iy,ix,iv)/data_n(iz,iy,ix,iv) , datain(ii,iv) , tmp_data )
+            data_ave(iz,iy,ix,iv) = data_ave(iz,iy,ix,iv) + datain(ii,iv) * w(ii)
+            data_std(iz,iy,ix,iv) = data_std(iz,iy,ix,iv) + ( datain(ii,iv) ** 2 )*w(ii)
         ENDIF
 
 
-        IF( tmpdatain(ii,iv) > data_max(iz,iy,ix,iv) )THEN
-          data_max(iz,iy,ix,iv) = tmpdatain(ii,iv)
+        IF( datain(ii,iv) > data_max(iz,iy,ix,iv) )THEN
+          data_max(iz,iy,ix,iv) = datain(ii,iv)
         ENDIF
-        IF( tmpdatain(ii,iv) < data_min(iz,iy,ix,iv) )THEN
-          data_min(iz,iy,ix,iv) = tmpdatain(ii,iv)
+        IF( datain(ii,iv) < data_min(iz,iy,ix,iv) )THEN
+          data_min(iz,iy,ix,iv) = datain(ii,iv)
         ENDIF
 
       ENDIF
@@ -200,8 +185,9 @@ DO iv = 1,nvar !Loop over the variables (we can perform OMP over this loop)
 
 
 ENDDO
-
 !$OMP END PARALLEL DO
+
+
 
 END SUBROUTINE com_interp_boxavereg
 
