@@ -147,9 +147,9 @@ class SoFields(object):
             datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
             datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
 
-            datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
-            datamaskin[:,4*iv:4*(iv+1)] = np.ones([na*nr,4]).astype(bool)
-            datamaskin[ datain[:,4*iv+3] == variables[var]['_FillValue'] , 4*iv:4*(iv+1) ]=False
+            datain[:,4*iv+3] =  np.reshape( variables[var]['data'].data , na*nr )
+            datamaskin[:,4*iv:4*(iv+1)] = np.repeat( np.reshape( variables[var]['data'].mask , na*nr),4,axis=1)  #np.ones([na*nr,4]).astype(bool)
+            #datamaskin[ datain[:,4*iv+3] == variables[var]['_FillValue'] , 4*iv:4*(iv+1) ]=False
 
             if var == 'CHZ' and weigth_vars :   #TODO Replace CHZ by the "reflectivity name"
                w_i = 4*iv+3 #Reflectivity is the variable that can be used as a weight.
