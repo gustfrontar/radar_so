@@ -617,7 +617,7 @@ def write_letkf(filename, obj):
         #print( np.max( tmp_data ) , np.min( tmp_data ) )
         #print( tmp_data.dtype )
 
-    print( np.max( tmp_n ) , np.sum( tmp_n ) , np.sum( tmp_n > 0 ) )
+    #print( np.max( tmp_n ) , np.sum( tmp_n ) , np.sum( tmp_n > 0 ) )
     #Filter grid points in which the number of data points is less than min_n observations
     min_n = 10  #TODO this should became an input parameter
     tmp_n[ tmp_n < min_n ]=0
