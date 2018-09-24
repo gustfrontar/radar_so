@@ -461,7 +461,7 @@ def main_radar_so(input, output_freq, grid_dims, options ,outputpath=None):
 
            # Write LETKF file
            outfile = outputpath + '/letkf/' + radar.metadata['instrument_name'] + '_' + date2str(mydate) + '.dat'
-           outfile_list.append(ntpath.basename(outfile))
+           outfile_list.append( outfile )
            write_letkf(outfile, so)
 
            inirayidx = iray
