@@ -45,8 +45,8 @@ OPEN(UNIT=99, FILE=filename, FORM='unformatted')
 
    DO iv=1,nvar
 
-    max_obs(iv) = -999.0d10
-    min_obs(iv) = 999.0d10
+    !max_obs(iv) = -999.0d10
+    !min_obs(iv) = 999.0d10
 
     DO ii=1,nlev
      DO jj=1,nlat
@@ -63,19 +63,19 @@ OPEN(UNIT=99, FILE=filename, FORM='unformatted')
            wk(7)=REAL(lambdar,r_sngl)
            WRITE(99)wk
            nobs = nobs + 1
-           if( data_in(ii,jj,kk,iv) > max_obs(iv) )max_obs(iv)=data_in(ii,jj,kk,iv)
-           if( data_in(ii,jj,kk,iv) < min_obs(iv) )THEN 
-             min_obs(iv)=data_in(ii,jj,kk,iv)
-             !write(*,*)data_in(ii,jj,kk,iv),ndata_in(ii,jj,kk,iv)
-           endif
+           !if( data_in(ii,jj,kk,iv) > max_obs(iv) )max_obs(iv)=data_in(ii,jj,kk,iv)
+           !if( data_in(ii,jj,kk,iv) < min_obs(iv) )THEN 
+           !  min_obs(iv)=data_in(ii,jj,kk,iv)
+           !  !write(*,*)data_in(ii,jj,kk,iv),ndata_in(ii,jj,kk,iv)
+           !endif
            !WRITE(*,*)wk
        ENDIF
       ENDDO
      ENDDO
     ENDDO
-    WRITE(*,*)'Max obs :',max_obs(iv),' Min obs:',min_obs(iv),' var = ',ido(iv)
+    !WRITE(*,*)'Max obs :',max_obs(iv),' Min obs:',min_obs(iv),' var = ',ido(iv)
    ENDDO
-   WRITE(*,*)'Total obs :',nobs
+   !WRITE(*,*)'Total obs :',nobs
 
 END SUBROUTINE write_radar
 

@@ -577,25 +577,11 @@ def write_letkf(filename, obj):
     nobs = 0
     wk = np.empty(7)
 
-    #with open(filename, 'wb') as fout:
-        # Write radar location and altitude
-        #tmp1.tofile(fout, format='int32')
-        #obj.radar.longitude['data'].tofile(fout, format='float32')
-        #tmp1.tofile(fout, format='int32')
-        #tmp1.tofile(fout, format='int32')
-        #obj.radar.latitude['data'].tofile(fout, format='float32')
-        #tmp1.tofile(fout, format='int32')
-        #tmp1.tofile(fout, format='int32')
-        #obj.radar.altitude['data'].tofile(fout, format='float32')
-        #tmp1.tofile(fout, format='int32')
-
     nvar = len( obj.fields.keys() )
-    #ngrid = obj.grid.nlev*obj.grid.nlat*obj.grid.nlon
 
     tmp_error=np.zeros( nvar )
     tmp_id   =np.zeros( nvar )
     tmp_lambda =  3.0 #TODO check this value and get it from the radar object.
-    #tmp_obs = np.zeros(( nvars*ngrid , 8))
 
 
     for iv , var in enumerate(obj.fields.keys()) :
@@ -614,10 +600,7 @@ def write_letkf(filename, obj):
         tmp_n   [:,:,:,iv] = obj.fields[var]['nobs']
         tmp_error     [iv] = obj.fields[var]['error']
         tmp_id        [iv] = obj.fields[var]['id']
-        #print( np.max( tmp_data ) , np.min( tmp_data ) )
-        #print( tmp_data.dtype )
 
-    #print( np.max( tmp_n ) , np.sum( tmp_n ) , np.sum( tmp_n > 0 ) )
     #Filter grid points in which the number of data points is less than min_n observations
     min_n = 10  #TODO this should became an input parameter
     tmp_n[ tmp_n < min_n ]=0
@@ -631,44 +614,14 @@ def write_letkf(filename, obj):
                    radar_lat=obj.radar.latitude['data'] ,
                    radar_z=obj.radar.altitude['data'] )
 
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,0]= obj.fields[var]['id']
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,1]= np.reshape( obj.fields[var]['az'] , ngrid )
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,2]= np.reshape( obj.fields[var]['el'] , ngrid )
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,3]= np.reshape( obj.fields[var]['ra'] , ngrid )
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,4]= np.reshape( obj.fields[var]['data'] , ngrid )
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,5]= obj.fields[var]['error']
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,6]= 3 #TODO chequear este valor 
-    #   tmp_obs[iv*ngrid:(iv+1)*ngrid,7]= np.reshape( obj.fields[var]['nobs'] , ngrid )
+    #Write summary.
+    for vi , var in enumerate(obj.fields.keys()) :
+        totalnobs=np.sum( tmp_n[:,:,:,iv] > 0 )
+        if totalnobs > 0 :
+           print('Total observations for obstype ' + str(np.array(obj.fields[var]['id'])) + ' = ' + str(totalnobs) )
+           print('Max value is ' + str(np.max( tmp_data[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ] )) )
+           print('Min value is ' + str(np.min( tmp_data[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ] )) )
 
-    #tmp_obs=tmp_obs[tmp_obs[:,7] > 0,0:7]
-
-    #print('A total number of ' + str(tmp_obs.shape[0]) + ' observations have been written to file ' + filename)
-
-    #fo = open( filename , 'wb')
-
-    #loio.writeobs_radar_all(fo, obj.radar.longitude['data'] , obj.radar.latitude['data'] , obj.radar.altitude['data'] , tmp_obs , endian='>' )
-
-        #for k in range(obj.grid.nlev):
-        #    for j in range(obj.grid.nlat):
-        #        for i in range(obj.grid.nlon):
-        #            for key in obj.fields.keys():
-        #                if obj.fields[key]['nobs'][k, j, i] > 0:
-        #                    wk[0] = obj.fields[key]['id']
-        #                    wk[1] = obj.fields[key]['az'][k, j, i]
-        #                    wk[2] = obj.fields[key]['el'][k, j, i]
-        #                    wk[3] = obj.fields[key]['ra'][k, j, i]
-        #                    wk[4] = obj.fields[key]['data'][k, j, i]
-        #                    wk[5] = obj.fields[key]['error']
-        #                    wk[6] = 3 # CORREGIR (banda del radar) !!!!!!
-
-        #                    # Write necessary data, including observation id and error and radar type
-        #                    tmp2.tofile(fout, format='int32')
-        #                    wk.tofile(fout, format='float32')
-        #                    tmp2.tofile(fout, format='int32')
-
-        #                    nobs += 1
-
-    #print('A total number of ' + str(tmp_obs.shape[0]) + ' observations have been written to file ' + filename)
 
 def str2date(string):
     """ String must be with format %Y-%m-%dT%H:%M:%SZ """
