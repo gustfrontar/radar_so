@@ -73,7 +73,12 @@ class SoFields(object):
                 # Convert dBZ to power
                 #if 'reflectivity' in vars_data[var]['standard_name']:
                 if var == 'CZH':
-                    vars_data[var]['data'] = np.power(10, vars_data[var]['data']/10.)
+                    #tmp_mask = np.ones( np.shape( vars_data[var]['data'] ) ).astype(bool)
+                    #tmp_mask[ vars_data[var]['data'] == vars_data[var]['_FillValue']  ] = False
+                    vars_data[var]['data'] = np.power(10.0, vars_data[var]['data']/10.0)
+                    vars_data[var]['data'].data[ vars_data[var]['data'].mask  ] = vars_data[var]['_FillValue']
+
+
             #print(vars_data[var]['data'].shape)
 
         # Average data
@@ -118,7 +123,7 @@ class SoFields(object):
         nz  =self.grid.nlev
 
 
-        local_undef = -999.0e10
+        local_undef = -8888.0
 
         #Reshape variables.
 
@@ -145,9 +150,14 @@ class SoFields(object):
             datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
             datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
 
-            datain[:,4*iv+3] =  np.reshape( variables[var]['data'].data , na*nr )
-            tmp_mask = np.reshape( variables[var]['data'].mask , na*nr )
-            datain[tmp_mask,4*iv:4*(iv+1)] = local_undef
+            tmp_mask         =  variables[var]['data'].data == variables[var]['_FillValue']
+            datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
+            tmp_mask         =  np.reshape( tmp_mask , na*nr )
+
+            #tmp_mask = np.reshape( variables[var]['data'].mask , na*nr )
+            #Change for variable undef into local_undef.
+            for ii in range( 0 , 4 ) :
+               datain[ tmp_mask , 4*iv+ii ] = local_undef
 
             if var == 'CHZ' and weigth_vars :   #TODO Replace CHZ by the "reflectivity name"
                w_i = 4*iv+3 #Reflectivity is the variable that can be used as a weight.
@@ -180,7 +190,6 @@ class SoFields(object):
             self.fields['grid_' + var]['ra']=data_ave[:,:,:,2+iv*4]
             self.fields['grid_' + var]['data']=data_ave[:,:,:,3+iv*4]
             self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
-            #print( np.max( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) , np.min( self.fields['grid_' + var]['data'][ data_n[:,:,:,3] > 0 ] ) )
 
 
     #*********************
@@ -615,7 +624,7 @@ def write_letkf(filename, obj):
                    radar_z=obj.radar.altitude['data'] )
 
     #Write summary.
-    for vi , var in enumerate(obj.fields.keys()) :
+    for iv , var in enumerate(obj.fields.keys()) :
         totalnobs=np.sum( tmp_n[:,:,:,iv] > 0 )
         if totalnobs > 0 :
            print('Total observations for obstype ' + str(np.array(obj.fields[var]['id'])) + ' = ' + str(totalnobs) )
