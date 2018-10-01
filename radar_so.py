@@ -146,23 +146,15 @@ class SoFields(object):
 
         for iv , var in enumerate( variables )  :
 
-            for ia in range( na ) :
-               for ir in range( nr ) :
-                   datain[ia*(nr)+ir,4*iv+0]=self.radar.azimuth['data'][ia]
-                   datain[ia*(nr)+ir,4*iv+1]=self.radar.elevation['data'][ia]
-                   datain[ia*(nr)+ir,4*iv+2]=self.radar.range['data'][ir]
-                   datain[ia*(nr)+ir,4*iv+3]=variables[var]['data'].data[ia,ir]
-            #TODO chequear que esto esta bien y que es consitente con el reshape que viene despues.
-            #datain[:,4*iv+0]=np.matlib.repmat( self.radar.azimuth['data'] , 1 , nr )
-            #datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
-            #datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
+            for ir in range( nr ) :
+               #for ir in range( nr ) :
+               datain[ir*na:(ir+1)*na,4*iv+0]=self.radar.azimuth['data'][:]
+               datain[ir*na:(ir+1)*na,4*iv+1]=self.radar.elevation['data'][:]
+               datain[ir*na:(ir+1)*na,4*iv+2]=self.radar.range['data'][ir]
+               datain[ir*na:(ir+1)*na,4*iv+3]=variables[var]['data'].data[:,ir]
 
-            #tmp_mask         =  variables[var]['data'].data == variables[var]['_FillValue']
-            #datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
-            #tmp_mask         =  np.reshape( tmp_mask , na*nr )
             tmp_mask = ( datain[:,4*iv+3] == variables[var]['_FillValue'] )
 
-            #tmp_mask = np.reshape( variables[var]['data'].mask , na*nr )
             #Change for variable undef into local_undef.
             for ii in range( 0 , 4 ) :
                datain[ tmp_mask , 4*iv+ii ] = local_undef
@@ -198,7 +190,6 @@ class SoFields(object):
             self.fields['grid_' + var]['ra']=data_ave[:,:,:,2+iv*4]
             self.fields['grid_' + var]['data']=data_ave[:,:,:,3+iv*4]
             self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
-
 
     #*********************
     # Auxiliary functions
