@@ -125,12 +125,6 @@ class SoFields(object):
 
         local_undef = -8888.0
 
-        #Reshape variables.
-
-        latin= np.reshape( self.radar.gate_latitude['data'] , na*nr )
-        lonin= np.reshape( self.radar.gate_longitude['data'] , na*nr )
-        zin  = np.reshape( self.radar.gate_altitude['data'] , na*nr )
-
         #Group all variables that will be "superobbed" into one single array.
         #This is to take advantage of paralellization. Different columns will be processed in parallel.
         datain  =np.zeros( ( na*nr , 4*nvar ) )
@@ -152,6 +146,10 @@ class SoFields(object):
                datain[ir*na:(ir+1)*na,4*iv+1]=self.radar.elevation['data'][:]
                datain[ir*na:(ir+1)*na,4*iv+2]=self.radar.range['data'][ir]
                datain[ir*na:(ir+1)*na,4*iv+3]=variables[var]['data'].data[:,ir]
+
+               latin[ir*na:(ir+1)*na] = self.radar.gate_latitude['data'][:,ir]
+               lonin[ir*na:(ir+1)*na] = self.radar.gate_longitude['data'][:,ir]
+               zin  [ir*na:(ir+1)*na] = self.radar.gate_altitude['data'][:,ir]
 
             tmp_mask = ( datain[:,4*iv+3] == variables[var]['_FillValue'] )
 
