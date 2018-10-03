@@ -125,16 +125,12 @@ class SoFields(object):
 
         local_undef = -8888.0
 
-        #Reshape variables.
-
-        latin= np.reshape( self.radar.gate_latitude['data'] , na*nr )
-        lonin= np.reshape( self.radar.gate_longitude['data'] , na*nr )
-        zin  = np.reshape( self.radar.gate_altitude['data'] , na*nr )
-
         #Group all variables that will be "superobbed" into one single array.
         #This is to take advantage of paralellization. Different columns will be processed in parallel.
         datain  =np.zeros( ( na*nr , 4*nvar ) )
-        datamaskin=np.ones( ( na*nr , 4*nvar ) ).astype(bool)
+        latin   =np.zeros( ( na*nr  ) )
+        lonin   =np.zeros( ( na*nr  ) )
+        zin     =np.zeros( ( na*nr  ) )
 
         var_names = []
 
@@ -143,19 +139,22 @@ class SoFields(object):
         weigth_vars=False  #TODO this should go to the configuration. (Enable or disable reflectivity weithning)
         w_i=0
 
+
         for iv , var in enumerate( variables )  :
 
-            #TODO chequear que esto esta bien y que es consitente con el reshape que viene despues.
-            datain[:,4*iv+0]=np.matlib.repmat( self.radar.azimuth['data'] , 1 , nr )
-            datain[:,4*iv+1]=np.matlib.repmat( self.radar.elevation['data'] , 1 , nr )
-            datain[:,4*iv+2]=np.matlib.repmat( self.radar.range['data'] , 1 , na )
+            for ir in range( nr ) :
+               #for ir in range( nr ) :
+               datain[ir*na:(ir+1)*na,4*iv+0]=self.radar.azimuth['data'][:]
+               datain[ir*na:(ir+1)*na,4*iv+1]=self.radar.elevation['data'][:]
+               datain[ir*na:(ir+1)*na,4*iv+2]=self.radar.range['data'][ir]
+               datain[ir*na:(ir+1)*na,4*iv+3]=variables[var]['data'].data[:,ir]
 
-            tmp_mask         =  variables[var]['data'].data == variables[var]['_FillValue']
-            datain[:,4*iv+3] =  np.reshape( variables[var]['data'] , na*nr )
-            tmp_mask         =  np.reshape( tmp_mask , na*nr )
+               latin[ir*na:(ir+1)*na] = self.radar.gate_latitude['data'][:,ir]
+               lonin[ir*na:(ir+1)*na] = self.radar.gate_longitude['data'][:,ir]
+               zin  [ir*na:(ir+1)*na] = self.radar.gate_altitude['data'][:,ir]
 
-            #tmp_mask = np.reshape( variables[var]['data'].mask , na*nr )
             #Change for variable undef into local_undef.
+            tmp_mask = ( datain[:,4*iv+3] == variables[var]['_FillValue'] )
             for ii in range( 0 , 4 ) :
                datain[ tmp_mask , 4*iv+ii ] = local_undef
 
@@ -190,7 +189,6 @@ class SoFields(object):
             self.fields['grid_' + var]['ra']=data_ave[:,:,:,2+iv*4]
             self.fields['grid_' + var]['data']=data_ave[:,:,:,3+iv*4]
             self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
-
 
     #*********************
     # Auxiliary functions
