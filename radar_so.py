@@ -128,7 +128,9 @@ class SoFields(object):
         #Group all variables that will be "superobbed" into one single array.
         #This is to take advantage of paralellization. Different columns will be processed in parallel.
         datain  =np.zeros( ( na*nr , 4*nvar ) )
-        datamaskin=np.ones( ( na*nr , 4*nvar ) ).astype(bool)
+        latin   =np.zeros( ( na*nr  ) )
+        lonin   =np.zeros( ( na*nr  ) )
+        zin     =np.zeros( ( na*nr  ) )
 
         var_names = []
 
@@ -151,9 +153,8 @@ class SoFields(object):
                lonin[ir*na:(ir+1)*na] = self.radar.gate_longitude['data'][:,ir]
                zin  [ir*na:(ir+1)*na] = self.radar.gate_altitude['data'][:,ir]
 
-            tmp_mask = ( datain[:,4*iv+3] == variables[var]['_FillValue'] )
-
             #Change for variable undef into local_undef.
+            tmp_mask = ( datain[:,4*iv+3] == variables[var]['_FillValue'] )
             for ii in range( 0 , 4 ) :
                datain[ tmp_mask , 4*iv+ii ] = local_undef
 

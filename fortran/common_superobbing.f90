@@ -149,8 +149,8 @@ DO iv = 1,nvar !Loop over the variables (we can perform OMP over this loop)
             data_std(iz,iy,ix,iv) = data_std(iz,iy,ix,iv) + ( datain(ii,iv) ** 2 )*w(ii)
         ELSE
             CALL min_angle_distance( data_ave(iz,iy,ix,iv)/data_n(iz,iy,ix,iv) , datain(ii,iv) , tmp_data )
-            data_ave(iz,iy,ix,iv) = data_ave(iz,iy,ix,iv) + datain(ii,iv) * w(ii)
-            data_std(iz,iy,ix,iv) = data_std(iz,iy,ix,iv) + ( datain(ii,iv) ** 2 )*w(ii)
+            data_ave(iz,iy,ix,iv) = data_ave(iz,iy,ix,iv) + tmp_data * w(ii)
+            data_std(iz,iy,ix,iv) = data_std(iz,iy,ix,iv) + ( tmp_data ** 2 )*w(ii)
         ENDIF
 
 
