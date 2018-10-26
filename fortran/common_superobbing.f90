@@ -43,6 +43,11 @@ REAL(r_sngl) :: wk(7)
 nobs=0
 OPEN(UNIT=99, FILE=filename, FORM='unformatted')
 
+!Write file header
+write(99)REAL(radar_lon,r_sngl)
+write(99)REAL(radar_lat,r_sngl)
+write(99)REAL(radar_z,r_sngl)
+
    DO iv=1,nvar
 
     !max_obs(iv) = -999.0d10
@@ -54,15 +59,16 @@ OPEN(UNIT=99, FILE=filename, FORM='unformatted')
 
        !correspond to the location where the stronger echoes are located.
        IF( ndata_in(ii,jj,kk,iv) > 0 )THEN
+           wk(1)=REAL(ido(iv),r_sngl)
            wk(2)=REAL(grid_az(ii,jj,kk,iv),r_sngl)
            wk(3)=REAL(grid_el(ii,jj,kk,iv),r_sngl)
            wk(4)=REAL(grid_ra(ii,jj,kk,iv),r_sngl)
-           wk(1)=REAL(ido(iv),r_sngl)
-           wk(6)=REAL(error(iv),r_sngl)
            wk(5)=REAL(data_in(ii,jj,kk,iv),r_sngl)
+           wk(6)=REAL(error(iv),r_sngl)
            wk(7)=REAL(lambdar,r_sngl)
            WRITE(99)wk
            nobs = nobs + 1
+
            !if( data_in(ii,jj,kk,iv) > max_obs(iv) )max_obs(iv)=data_in(ii,jj,kk,iv)
            !if( data_in(ii,jj,kk,iv) < min_obs(iv) )THEN 
            !  min_obs(iv)=data_in(ii,jj,kk,iv)
