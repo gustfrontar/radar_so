@@ -190,6 +190,8 @@ class SoFields(object):
             self.fields['grid_' + var]['data']=data_ave[:,:,:,3+iv*4]
             self.fields['grid_' + var]['nobs']=data_n[:,:,:,3+iv*4]
 
+        #print('MAX AZ', np.max( self.fields['grid_' + var]['az']  ) )
+
     #*********************
     # Auxiliary functions
     #*********************
@@ -564,8 +566,10 @@ def update_boxaverage(old_obj, new_obj):
                if subkey != 'nobs' and subkey != 'id' and subkey != 'error' and subkey != 'min':
                    #print( nobs_old.shape , old_obj[key][subkey].shape )
                    new_obj.fields[key][subkey] = \
-                      np.ma.masked_invalid((nobs_new*new_obj.fields[key][subkey] +\
-                      nobs_old*old_obj[key][subkey])/np.ma.masked_invalid(nobs_tot))
+                       nobs_new*new_obj.fields[key][subkey] + nobs_old*old_obj[key][subkey]
+                   new_obj.fields[key][subkey][ nobs_tot > 0 ] = new_obj.fields[key][subkey][ nobs_tot > 0 ] / nobs_tot[ nobs_tot > 0 ]
+                   #   np.ma.masked_invalid((nobs_new*new_obj.fields[key][subkey] +\
+                   #   nobs_old*old_obj[key][subkey])/np.ma.masked_invalid(nobs_tot))
            new_obj.fields[key]['nobs'] = nobs_tot
 
 def write_object(filename, obj):
@@ -630,6 +634,13 @@ def write_letkf(filename, obj):
            print('Total observations for obstype ' + str(np.array(obj.fields[var]['id'])) + ' = ' + str(totalnobs) )
            print('Max value is ' + str(np.max( tmp_data[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ] )) )
            print('Min value is ' + str(np.min( tmp_data[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ] )) )
+           print('Grid properties')
+           print('Max azimuth is  ',np.max(tmp_az[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ])) 
+           print('Min azimuth is  ',np.min(tmp_az[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ]))
+           print('Max elevation is  ',np.max(tmp_el[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ]))
+           print('Min elevation is  ',np.min(tmp_el[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ]))
+           print('Max range is  ',np.max(tmp_ra[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ]))
+           print('Min range is  ',np.min(tmp_ra[:,:,:,iv][ tmp_n[:,:,:,iv] > 0 ]))
 
 
 def str2date(string):
