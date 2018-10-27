@@ -588,7 +588,9 @@ def write_letkf(filename, obj):
 
     tmp_error=np.zeros( nvar )
     tmp_id   =np.zeros( nvar )
-    tmp_lambda =  3.0 #TODO check this value and get it from the radar object.
+    tmp_lambda =  12.0 #TODO check this value and get it from the radar object.
+                       #Temporarily this value is assumed to be equal to S-BAND 
+                       #an specific C-BAND operator has not been coded yet in the LETKF.
 
 
     for iv , var in enumerate(obj.fields.keys()) :
