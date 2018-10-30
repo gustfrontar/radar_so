@@ -316,8 +316,8 @@ class SoGrid(object):
 
         # Compute possible value for `nlon` in order to cover the maximum radar range
         if maxrange == None  :
-            maxrange = 2.*np.max(radar.range['data'])
-        self.nlon = np.ceil(maxrange/self.dx).astype('int')
+            maxrange = np.max(radar.range['data'])
+        self.nlon = np.ceil(2.*maxrange/self.dx).astype('int')
         self.nlat = self.nlon
         self.nlev = np.ceil(maxz/self.dz).astype('int')
 
