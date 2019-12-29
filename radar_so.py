@@ -10,7 +10,7 @@ import pyart
 import matplotlib.pyplot as plt
 import sys 
 import os
-sys.path.append( '../radar_so/fortran/' )
+sys.path.append( '/home/jruiz/share/RADAR/radar_so/fortran/' )
 import ntpath
 from cs  import cs   #Fortran code routines.
 
